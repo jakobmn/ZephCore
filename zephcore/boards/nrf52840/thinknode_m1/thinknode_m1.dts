@@ -45,6 +45,8 @@
 		lora0 = &lora;
 		led0 = &led_green;
 		led1 = &led_blue;
+		led2 = &lora_tx_led;
+		lora-tx-led = &lora_tx_led;
 		sw0 = &user_button;
 		watchdog0 = &wdt0;
 		buzzer = &buzzer;
@@ -63,6 +65,12 @@
 		led_blue: led_1 {
 			gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
 			label = "Blue LED";
+		};
+
+		/* LoRa TX activity LED (active-high, matches Arduino P_LORA_TX_LED) */
+		lora_tx_led: led_2 {
+			gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+			label = "TX LED";
 		};
 		/* LED_RED (P1.06) omitted — shared with display SPI MISO */
 	};
@@ -172,14 +180,14 @@
 		};
 	};
 
-	/* Display power enable (P1.11) — drives the EPD's boost converter /
-	 * frontlight.  Without this HIGH, SPI works but the charge pump
-	 * cannot flip e-ink particles (display appears dead). */
+	/* Display backlight enable (P1.11) — powers the e-paper frontlight.
+	 * The hardware knob dims brightness; this GPIO gates the circuit.
+	 * Controlled dynamically by display.c (on with display, off on auto-off)
+	 * so the backlight is fully off when not needed. */
 	disp_pwr_enable: disp-pwr-enable {
 		compatible = "regulator-fixed";
 		regulator-name = "disp-pwr-enable";
 		enable-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
-		regulator-boot-on;
 	};
 
 	/* ---- E-Paper display (MIPI DBI SPI) ----
@@ -201,6 +209,7 @@
 			reg = <0>;
 			width = <200>;
 			height = <200>;
+			rotation = <270>;
 			busy-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
 		};
 	};

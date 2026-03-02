@@ -6,6 +6,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/gpio.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -16,6 +17,15 @@
 #define BOOTLOADER_DFU_UF2_MAGIC    0x57  /* Enter UF2 mass storage mode (CDC + MSC) */
 #define BOOTLOADER_DFU_OTA_MAGIC    0xA8  /* Enter BLE OTA DFU mode */
 #define NRF52_GPREGRET 1
+#endif
+
+/* LoRa TX activity LED (optional — defined per-board via DT alias) */
+#if DT_NODE_EXISTS(DT_ALIAS(lora_tx_led))
+static const struct gpio_dt_spec tx_led =
+	GPIO_DT_SPEC_GET(DT_ALIAS(lora_tx_led), gpios);
+#define HAS_TX_LED 1
+#else
+#define HAS_TX_LED 0
 #endif
 
 #include <zephyr/logging/log.h>
@@ -53,6 +63,18 @@ static const struct device *vbat_enable_dev = NULL;
 #define VBAT_MV_MULTIPLIER CONFIG_ZEPHCORE_VBAT_MV_MULTIPLIER
 #endif
 #define VBAT_ADC_SAMPLES   8
+#endif
+
+/* Initialize TX LED GPIO at boot */
+#if HAS_TX_LED
+static int tx_led_init(void)
+{
+	if (gpio_is_ready_dt(&tx_led)) {
+		gpio_pin_configure_dt(&tx_led, GPIO_OUTPUT_INACTIVE);
+	}
+	return 0;
+}
+SYS_INIT(tx_led_init, APPLICATION, 90);
 #endif
 
 namespace mesh {
@@ -140,6 +162,20 @@ float ZephyrBoard::getMCUTemperature()
 const char *ZephyrBoard::getManufacturerName() const
 {
 	return CONFIG_ZEPHCORE_BOARD_NAME;
+}
+
+void ZephyrBoard::onBeforeTransmit()
+{
+#if HAS_TX_LED
+	gpio_pin_set_dt(&tx_led, 1);
+#endif
+}
+
+void ZephyrBoard::onAfterTransmit()
+{
+#if HAS_TX_LED
+	gpio_pin_set_dt(&tx_led, 0);
+#endif
 }
 
 void ZephyrBoard::reboot()

@@ -14,6 +14,8 @@ public:
 	uint16_t getBattMilliVolts() override;
 	float getMCUTemperature() override;
 	const char *getManufacturerName() const override;
+	void onBeforeTransmit() override;
+	void onAfterTransmit() override;
 	void reboot() override;
 	void rebootToBootloader();        /* Reboot into UF2 mass storage bootloader */
 	bool getBootloaderVersion(char *version, size_t max_len) override;

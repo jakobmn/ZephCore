@@ -20,6 +20,7 @@
 #include <zephyr/device.h>
 #include <zephyr/display/cfb.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/drivers/regulator.h>
 #include <zephyr/kernel.h>
 #include <string.h>
 #include <stdio.h>
@@ -40,6 +41,27 @@ static uint8_t  font_w;
 static uint8_t  font_h;
 static bool     is_epd;       /* true for e-paper displays */
 
+/* Optional display backlight regulator (e.g. e-paper frontlight).
+ * Boards define a "disp_pwr_enable" regulator-fixed node to gate the
+ * backlight circuit.  When present, backlight follows display on/off. */
+#if DT_NODE_EXISTS(DT_NODELABEL(disp_pwr_enable))
+static const struct device *backlight_reg =
+	DEVICE_DT_GET_OR_NULL(DT_NODELABEL(disp_pwr_enable));
+#else
+static const struct device *backlight_reg;
+#endif
+
+static inline void backlight_set(bool on)
+{
+	if (backlight_reg && device_is_ready(backlight_reg)) {
+		if (on) {
+			regulator_enable(backlight_reg);
+		} else {
+			regulator_disable(backlight_reg);
+		}
+	}
+}
+
 /* Auto-off work */
 static struct k_work_delayable auto_off_work;
 
@@ -50,9 +72,10 @@ static void auto_off_handler(struct k_work *work)
 	if (doom_game_is_running()) {
 		return;
 	}
-	/* E-paper uses zero power when static — blanking wastes a full
-	 * refresh cycle (~2s) and leaves the screen blank for no benefit. */
+	/* E-paper content persists without power — blanking wastes a full
+	 * refresh cycle (~2s) for no benefit.  Just turn off the backlight. */
 	if (is_epd) {
+		backlight_set(false);
 		return;
 	}
 	if (disp_on) {
@@ -170,6 +193,7 @@ int mc_display_init(void)
 	cfb_framebuffer_finalize(disp_dev);
 
 	display_blanking_off(disp_dev);
+	backlight_set(true);
 	disp_on = true;
 	disp_initialized = true;
 
@@ -211,6 +235,7 @@ void mc_display_on(void)
 		display_blanking_off(disp_dev);
 		disp_on = true;
 	}
+	backlight_set(true);
 
 	mc_display_reset_auto_off();
 }
@@ -223,6 +248,7 @@ void mc_display_off(void)
 
 	if (disp_on) {
 		display_blanking_on(disp_dev);
+		backlight_set(false);
 		disp_on = false;
 	}
 }

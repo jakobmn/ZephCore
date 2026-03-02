@@ -80,12 +80,15 @@ LOG_MODULE_REGISTER(ui_task, CONFIG_ZEPHCORE_BOARD_LOG_LEVEL);
 /* Match Arduino: 4s cycle, 20ms pulse (normal) or 200ms (unread messages).
  * Uses led0 or led1 alias — whichever exists in the board's DTS.
  * Disabled when OLED display is present (display makes LED redundant). */
-#if DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && !IS_ENABLED(CONFIG_ZEPHCORE_UI_DISPLAY)
+/* Heartbeat LED — subtle pulse every 4s on led0 (or led1 fallback).
+ * Works alongside displays; boards that want to disable it can
+ * remove the led0 alias or override this with a Kconfig guard. */
+#if DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
 #define LED_NODE DT_ALIAS(led0)
 static const struct gpio_dt_spec heartbeat_led =
 	GPIO_DT_SPEC_GET(LED_NODE, gpios);
 #define HAS_HEARTBEAT_LED 1
-#elif DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios) && !IS_ENABLED(CONFIG_ZEPHCORE_UI_DISPLAY)
+#elif DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
 #define LED_NODE DT_ALIAS(led1)
 static const struct gpio_dt_spec heartbeat_led =
 	GPIO_DT_SPEC_GET(LED_NODE, gpios);
@@ -1032,6 +1035,16 @@ void ui_set_offgrid_mode(bool enabled)
 void ui_refresh_display(void)
 {
 	if (!ui_initialized) {
+		return;
+	}
+
+	/* EPD displays: skip periodic housekeeping renders.
+	 * Each full e-paper refresh takes ~2s and causes visible flashing.
+	 * All meaningful events (messages, BLE, GPS fix, button presses)
+	 * already trigger renders via their own ui_set_*() → schedule_render().
+	 * Housekeeping just updates slow-changing data (clock, contact ages)
+	 * which will appear on the next event-driven render. */
+	if (mc_display_is_epd()) {
 		return;
 	}
 
