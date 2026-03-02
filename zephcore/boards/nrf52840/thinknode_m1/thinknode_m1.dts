@@ -172,6 +172,16 @@
 		};
 	};
 
+	/* Display power enable (P1.11) — drives the EPD's boost converter /
+	 * frontlight.  Without this HIGH, SPI works but the charge pump
+	 * cannot flip e-ink particles (display appears dead). */
+	disp_pwr_enable: disp-pwr-enable {
+		compatible = "regulator-fixed";
+		regulator-name = "disp-pwr-enable";
+		enable-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+		regulator-boot-on;
+	};
+
 	/* ---- E-Paper display (MIPI DBI SPI) ----
 	 * SSD1681 1.54" 200x200 monochrome EPD on SPI3.
 	 * The MIPI DBI node wraps the SPI bus with DC and RST GPIOs.

@@ -41,10 +41,11 @@ PATTERN 2: Fully Custom Board (new DTS)
 Use this when your board does NOT exist in Zephyr's tree.
 You need a full board definition: .dts, pinctrl, Kconfig, etc.
 
-Examples: Ikoka Nano 30dBm (custom nRF52840 design)
+Examples: Ikoka Nano 30dBm, ThinkNode M1 (custom nRF52840 designs)
 
-Look at an existing custom board as a template:
-  zephcore/boards/nrf52840/ikoka_nano_30dbm/
+Look at existing custom boards as templates:
+  zephcore/boards/nrf52840/ikoka_nano_30dbm/   — minimal (LoRa only)
+  zephcore/boards/nrf52840/thinknode_m1/       — full-featured (EPD, GPS, QSPI, buzzer)
 
 A full custom board includes:
   board.conf                           — Kconfig (name, radio, overrides)

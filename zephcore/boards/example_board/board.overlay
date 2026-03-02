@@ -81,8 +81,9 @@
 		 * MG24:     skip (usart0 already set)
 		 */
 
-		/* --- Display (uncomment if board has OLED/LCD) ---
-		 * zephyr,display = &oled;
+		/* --- Display (uncomment if board has OLED/LCD/e-paper) ---
+		 * zephyr,display = &oled;       I2C OLED (SH1106, SSD1306)
+		 * zephyr,display = &epd;        SPI e-paper (SSD1681, etc.)
 		 */
 	};
 };
@@ -770,6 +771,50 @@
  *         multiplex-ratio = <63>;
  *         segment-remap;
  *         com-invdir;
+ *     };
+ * };
+ */
+
+/* --- E-Paper Display on SPI (any platform with SPI) ---
+ *
+ * Supported: "solomon,ssd1681" (1.54" 200x200 mono)
+ * Remember to set  zephyr,display = &epd;  in chosen block.
+ *
+ * IMPORTANT — HEAP: The CFB framebuffer is allocated via k_malloc at boot.
+ * The default heap (2048) is sized for 128x64 OLEDs (1024 bytes).
+ * Larger displays need more heap in board.conf:
+ *
+ *   Display         Resolution  Framebuffer   Heap needed
+ *   SSD1306/SH1106  128x64      1024 bytes    2048 (default)
+ *   SSD1681         200x200     5000 bytes    6144+
+ *   SSD1680         296x128     4736 bytes    6144+
+ *
+ * If the heap is too small, cfb_framebuffer_init() silently fails
+ * with -ENOMEM and the display stays blank (white for e-paper).
+ *
+ * The MIPI DBI node wraps SPI with DC and RST GPIOs.
+ * The display node is a child of the MIPI DBI node.
+ *
+ * If your EPD has a separate power/boost-converter enable GPIO,
+ * add a regulator-fixed node with regulator-boot-on (see ThinkNode M1).
+ *
+ * / {
+ *     mipi_dbi {
+ *         compatible = "zephyr,mipi-dbi-spi";
+ *         spi-dev = <&spi3>;
+ *         dc-gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>;
+ *         reset-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;
+ *         #address-cells = <1>;
+ *         #size-cells = <0>;
+ *
+ *         epd: ssd16xxfb@0 {
+ *             compatible = "solomon,ssd1681";
+ *             mipi-max-frequency = <4000000>;
+ *             reg = <0>;
+ *             width = <200>;
+ *             height = <200>;
+ *             busy-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+ *         };
  *     };
  * };
  */
