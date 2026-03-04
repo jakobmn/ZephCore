@@ -1,7 +1,6 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  * nRF52840 partition layout — SoftDevice s140 v7 + UF2 bootloader
- * Arduino MeshCore compatible (dual LFS, block_size=128)
  *
  * ┌──────────────────────────────────────────────────────────────────┐
  * │  ZephCore Board DTS Include Guide — Storage & Partitions        │
@@ -48,8 +47,7 @@
  * Memory map (1MB internal flash):
  *   0x00000 - 0x27000  (156KB) SoftDevice s140 v7 (reserved)
  *   0x27000 - 0xD4000  (692KB) Application
- *   0xD4000 - 0xED000  (100KB) ExtraFS (contacts, channels, blobs)
- *   0xED000 - 0xF4000  (28KB)  InternalFS (prefs, identity, BLE settings)
+ *   0xD4000 - 0xF4000  (128KB) LittleFS (/lfs automount)
  *   0xF4000 - 0x100000 (48KB)  UF2 bootloader (reserved)
  */
 
@@ -72,18 +70,10 @@
 			reg = <0x00027000 0x000AD000>;
 		};
 
-		/* ExtraFS — 100KB: contacts3, channels2, adv_blobs
-		 * Arduino: CustomLFS(0xD4000, 0x19000, 128) */
-		extrafs_partition: partition@d4000 {
-			label = "extrafs";
-			reg = <0x000D4000 0x00019000>;
-		};
-
-		/* InternalFS — 28KB: new_prefs, _main.id, BLE settings
-		 * Arduino: Adafruit InternalFS(0xED000, 0x7000, 128) */
-		internalfs_partition: partition@ed000 {
-			label = "internalfs";
-			reg = <0x000ED000 0x00007000>;
+		/* LittleFS — 128KB: identity, prefs, contacts, channels, blobs */
+		lfs_partition: partition@d4000 {
+			label = "lfs";
+			reg = <0x000D4000 0x00020000>;
 		};
 
 		/* UF2 bootloader — 48KB (reserved) */
@@ -94,3 +84,6 @@
 		};
 	};
 };
+
+/* LittleFS /lfs automount */
+#include "filesystem.dtsi"

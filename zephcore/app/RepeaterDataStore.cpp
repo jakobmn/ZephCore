@@ -11,11 +11,6 @@
 
 LOG_MODULE_REGISTER(zephcore_repeater_store, CONFIG_ZEPHCORE_DATASTORE_LOG_LEVEL);
 
-/* File paths for repeater data */
-#define REPEATER_DIR        "/lfs/repeater"
-#define IDENTITY_FILE       "/lfs/repeater/_main.id"
-#define PREFS_FILE          "/lfs/repeater/prefs"
-
 RepeaterDataStore::RepeaterDataStore() : _initialized(false) {
 }
 
@@ -24,63 +19,80 @@ bool RepeaterDataStore::begin() {
 
     /* Create repeater directory if it doesn't exist */
     struct fs_dirent entry;
-    int ret = fs_stat(REPEATER_DIR, &entry);
+    int ret = fs_stat(BASE_PATH, &entry);
     if (ret < 0) {
-        ret = fs_mkdir(REPEATER_DIR);
+        ret = fs_mkdir(BASE_PATH);
         if (ret < 0 && ret != -EEXIST) {
-            LOG_ERR("Failed to create %s: %d", REPEATER_DIR, ret);
+            LOG_ERR("Failed to create %s: %d", BASE_PATH, ret);
             return false;
         }
-        LOG_INF("Created %s directory", REPEATER_DIR);
+        LOG_INF("Created %s directory", BASE_PATH);
     }
 
     _initialized = true;
-    LOG_INF("RepeaterDataStore initialized");
+    LOG_INF("RepeaterDataStore initialized at %s", BASE_PATH);
     return true;
 }
 
+const char* RepeaterDataStore::getBasePath() const { return BASE_PATH; }
+
+const char* RepeaterDataStore::getAclPath() const {
+    static char buf[48];
+    snprintf(buf, sizeof(buf), "%s/acl", BASE_PATH);
+    return buf;
+}
+
+const char* RepeaterDataStore::getRegionsPath() const {
+    static char buf[48];
+    snprintf(buf, sizeof(buf), "%s/regions2", BASE_PATH);
+    return buf;
+}
+
 bool RepeaterDataStore::loadIdentity(mesh::LocalIdentity& id) {
+    char path[48];
+    snprintf(path, sizeof(path), "%s/_main.id", BASE_PATH);
+
     struct fs_file_t file;
     fs_file_t_init(&file);
 
-    int ret = fs_open(&file, IDENTITY_FILE, FS_O_READ);
+    int ret = fs_open(&file, path, FS_O_READ);
     if (ret < 0) {
-        LOG_WRN("No identity file at %s", IDENTITY_FILE);
-        return false;  // Caller must generate new identity
+        LOG_WRN("No identity file at %s", path);
+        return false;
     }
 
     uint8_t buf[PRV_KEY_SIZE + PUB_KEY_SIZE];
     ssize_t n = fs_read(&file, buf, sizeof(buf));
     fs_close(&file);
 
-    LOG_INF("loadIdentity: read %d bytes from %s", (int)n, IDENTITY_FILE);
+    LOG_INF("loadIdentity: read %d bytes from %s", (int)n, path);
 
     if (n >= PRV_KEY_SIZE) {
-        LOG_INF("loadIdentity: calling readFrom (will derive pubkey if n=%d)", (int)n);
         if (id.readFrom(buf, n)) {
-            LOG_INF("Loaded identity from %s", IDENTITY_FILE);
+            LOG_INF("Loaded identity from %s", path);
             return true;
         }
         LOG_ERR("loadIdentity: readFrom failed");
     }
 
     LOG_ERR("Identity file corrupt");
-    return false;  // Caller must generate new identity
+    return false;
 }
 
 bool RepeaterDataStore::saveIdentity(const mesh::LocalIdentity& id) {
-    /* Ensure directory exists */
     if (!_initialized) begin();
 
-    /* Remove old file first */
-    fs_unlink(IDENTITY_FILE);
+    char path[48];
+    snprintf(path, sizeof(path), "%s/_main.id", BASE_PATH);
+
+    fs_unlink(path);
 
     struct fs_file_t file;
     fs_file_t_init(&file);
 
-    int ret = fs_open(&file, IDENTITY_FILE, FS_O_CREATE | FS_O_WRITE);
+    int ret = fs_open(&file, path, FS_O_CREATE | FS_O_WRITE);
     if (ret < 0) {
-        LOG_ERR("Failed to open %s for write: %d", IDENTITY_FILE, ret);
+        LOG_ERR("Failed to open %s for write: %d", path, ret);
         return false;
     }
 
@@ -90,7 +102,7 @@ bool RepeaterDataStore::saveIdentity(const mesh::LocalIdentity& id) {
     fs_close(&file);
 
     if (n == len) {
-        LOG_INF("Saved identity to %s", IDENTITY_FILE);
+        LOG_INF("Saved identity to %s", path);
         return true;
     }
 
@@ -99,20 +111,22 @@ bool RepeaterDataStore::saveIdentity(const mesh::LocalIdentity& id) {
 }
 
 bool RepeaterDataStore::loadPrefs(NodePrefs& prefs) {
+    char path[48];
+    snprintf(path, sizeof(path), "%s/prefs", BASE_PATH);
+
     struct fs_file_t file;
     fs_file_t_init(&file);
 
-    int ret = fs_open(&file, PREFS_FILE, FS_O_READ);
+    int ret = fs_open(&file, path, FS_O_READ);
     if (ret < 0) {
-        LOG_DBG("No prefs file at %s, using defaults", PREFS_FILE);
+        LOG_DBG("No prefs file at %s, using defaults", path);
         initNodePrefs(&prefs);
         strcpy(prefs.node_name, "Repeater");
         return true;
     }
 
-    /* Get file size first */
     struct fs_dirent entry;
-    ret = fs_stat(PREFS_FILE, &entry);
+    ret = fs_stat(path, &entry);
     LOG_INF("loadPrefs: file size = %d bytes", ret < 0 ? 0 : (int)entry.size);
 
     uint8_t pad[8];
@@ -155,7 +169,7 @@ bool RepeaterDataStore::loadPrefs(NodePrefs& prefs) {
     fs_read(&file, prefs.owner_info, sizeof(prefs.owner_info));
 
     fs_close(&file);
-    LOG_INF("Loaded prefs from %s", PREFS_FILE);
+    LOG_INF("Loaded prefs from %s", path);
     LOG_INF("  name='%s' freq=%.3f sf=%u bw=%.1f tx_pwr=%d",
             prefs.node_name, (double)prefs.freq, prefs.sf, (double)prefs.bw, prefs.tx_power_dbm);
 
@@ -175,18 +189,19 @@ bool RepeaterDataStore::loadPrefs(NodePrefs& prefs) {
 }
 
 bool RepeaterDataStore::savePrefs(const NodePrefs& prefs) {
-    /* Ensure directory exists */
     if (!_initialized) begin();
 
-    /* Remove old file first */
-    fs_unlink(PREFS_FILE);
+    char path[48];
+    snprintf(path, sizeof(path), "%s/prefs", BASE_PATH);
+
+    fs_unlink(path);
 
     struct fs_file_t file;
     fs_file_t_init(&file);
 
-    int ret = fs_open(&file, PREFS_FILE, FS_O_CREATE | FS_O_WRITE);
+    int ret = fs_open(&file, path, FS_O_CREATE | FS_O_WRITE);
     if (ret < 0) {
-        LOG_ERR("Failed to open %s for write: %d", PREFS_FILE, ret);
+        LOG_ERR("Failed to open %s for write: %d", path, ret);
         return false;
     }
 
@@ -231,28 +246,27 @@ bool RepeaterDataStore::savePrefs(const NodePrefs& prefs) {
     fs_write(&file, prefs.owner_info, sizeof(prefs.owner_info));
 
     fs_close(&file);
-    LOG_INF("Saved prefs to %s", PREFS_FILE);
+    LOG_INF("Saved prefs to %s", path);
     return true;
 }
 
 bool RepeaterDataStore::formatFileSystem() {
-    LOG_WRN("Factory reset: erasing repeater data...");
+    LOG_WRN("Factory reset: erasing repeater data at %s", BASE_PATH);
 
-    /* Delete all files in /lfs/repeater/ */
     struct fs_dir_t dir;
     fs_dir_t_init(&dir);
 
-    int ret = fs_opendir(&dir, REPEATER_DIR);
+    int ret = fs_opendir(&dir, BASE_PATH);
     if (ret < 0) {
         LOG_WRN("No repeater directory to erase");
         return true;
     }
 
     struct fs_dirent entry;
-    char path[280];  /* REPEATER_DIR (14) + "/" (1) + MAX_FILE_NAME (255) + null */
+    char path[280];
 
     while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != '\0') {
-        snprintf(path, sizeof(path), "%s/%s", REPEATER_DIR, entry.name);
+        snprintf(path, sizeof(path), "%s/%s", BASE_PATH, entry.name);
         LOG_INF("Deleting %s", path);
         fs_unlink(path);
     }

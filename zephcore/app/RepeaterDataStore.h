@@ -31,17 +31,18 @@ public:
     bool savePrefs(const NodePrefs& prefs);
 
     /* ACL management - paths passed to ClientACL */
-    const char* getAclPath() const { return "/lfs/repeater/acl"; }
+    const char* getAclPath() const;
 
     /* Region management - paths passed to RegionMap */
-    const char* getRegionsPath() const { return "/lfs/repeater/regions2"; }
+    const char* getRegionsPath() const;
 
     /* Factory reset - erase all repeater data */
     bool formatFileSystem();
 
     /* Get base path for repeater storage */
-    static const char* getBasePath() { return "/lfs/repeater"; }
+    const char* getBasePath() const;
 
 private:
     bool _initialized;
+    static constexpr const char* BASE_PATH = "/lfs/repeater";
 };

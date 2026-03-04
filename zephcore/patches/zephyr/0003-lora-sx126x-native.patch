@@ -1,5 +1,5 @@
 diff --git a/drivers/lora/native/sx126x/sx126x.c b/drivers/lora/native/sx126x/sx126x.c
-index 37807cebe38..ecabeb9431f 100644
+index 37807cebe38..7d2f95b277e 100644
 --- a/drivers/lora/native/sx126x/sx126x.c
 +++ b/drivers/lora/native/sx126x/sx126x.c
 @@ -9,10 +9,19 @@
@@ -95,13 +95,13 @@ index 37807cebe38..ecabeb9431f 100644
  {
  	uint8_t val = boosted ? SX126X_RX_GAIN_BOOSTED : SX126X_RX_GAIN_POWER_SAVING;
 +	int ret;
-+
+ 
+-	return sx126x_hal_write_regs(dev, SX126X_REG_RX_GAIN, &val, 1);
 +	ret = sx126x_hal_write_regs(dev, SX126X_REG_RX_GAIN, &val, 1);
 +	if (ret < 0) {
 +		return ret;
 +	}
- 
--	return sx126x_hal_write_regs(dev, SX126X_REG_RX_GAIN, &val, 1);
++
 +	/* Add RX gain register to retention list (DS §9.6) so the chip
 +	 * preserves the setting across mode transitions.  Without this,
 +	 * register 0x08AC resets to power-saving on every SetRx. */
@@ -400,7 +400,7 @@ index 37807cebe38..ecabeb9431f 100644
  	/* Start transmission with 10 second timeout */
  	ret = sx126x_set_tx(dev, 10000);
  	if (ret < 0) {
-@@ -927,6 +1156,75 @@ static int sx126x_lora_test_cw(const struct device *dev, uint32_t frequency,
+@@ -927,6 +1156,116 @@ static int sx126x_lora_test_cw(const struct device *dev, uint32_t frequency,
  	return 0;
  }
  
@@ -473,10 +473,51 @@ index 37807cebe38..ecabeb9431f 100644
 +	k_mutex_unlock(&data->lock);
 +}
 +
++void sx126x_reset_agc(const struct device *dev)
++{
++	struct sx126x_data *data = dev->data;
++	const struct sx126x_hal_config *config = dev->config;
++
++	k_mutex_lock(&data->lock, K_FOREVER);
++
++	/* Warm sleep — powers down the analog frontend (resets AGC state)
++	 * but preserves register configuration. */
++	uint8_t sleep_cfg = SX126X_SLEEP_WARM_START;
++
++	sx126x_hal_write_cmd(dev, SX126X_CMD_SET_SLEEP, &sleep_cfg, 1);
++	k_busy_wait(500);
++
++	/* Wake to STANDBY_RC — required before Calibrate */
++	sx126x_set_standby(dev, SX126X_STANDBY_RC);
++
++	/* Full recalibration: ADC, PLL, image, RC oscillators */
++	sx126x_calibrate(dev, SX126X_CALIBRATE_ALL);
++	k_busy_wait(5000);
++	sx126x_hal_wait_busy(dev, 50);
++
++	/* Calibrate(0x7F) defaults image cal to 902-928 MHz band.
++	 * Re-calibrate for the actual operating frequency. */
++	if (data->config_valid) {
++		sx126x_calibrate_image(dev, data->config.frequency);
++	}
++
++	/* Re-apply DIO2 as RF switch if configured */
++	if (config->dio2_tx_enable) {
++		sx126x_set_dio2_as_rf_switch(dev, true);
++	}
++
++	/* Re-apply RX boosted gain if it was enabled */
++	if (data->rx_boost_enabled) {
++		sx126x_set_rx_gain(dev, true);
++	}
++
++	k_mutex_unlock(&data->lock);
++}
++
  static DEVICE_API(lora, sx126x_lora_api) = {
  	.config = sx126x_lora_config,
  	.send = sx126x_lora_send,
-@@ -952,6 +1250,14 @@ static int sx126x_init(const struct device *dev)
+@@ -952,6 +1291,14 @@ static int sx126x_init(const struct device *dev)
  	data->dev = dev;
  	atomic_set(&data->state, SX126X_STATE_IDLE);
  	data->config_valid = false;

@@ -32,7 +32,7 @@ bool RegionMap::is_name_char(uint8_t c) {
 }
 
 bool RegionMap::load(const char* path) {
-    const char* filepath = path ? path : "/lfs/repeater/regions2";
+    const char* filepath = path;
 
     struct fs_file_t file;
     fs_file_t_init(&file);
@@ -76,7 +76,7 @@ bool RegionMap::load(const char* path) {
 }
 
 bool RegionMap::save(const char* path) {
-    const char* filepath = path ? path : "/lfs/repeater/regions2";
+    const char* filepath = path;
 
     // Remove old file first
     fs_unlink(filepath);

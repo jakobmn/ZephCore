@@ -2,18 +2,8 @@
  * SPDX-License-Identifier: Apache-2.0
  * Zephyr DataStore - LittleFS-backed persistence with optional QSPI flash
  *
- * Universal mount strategy:
- *   nRF52:  Manual mount /efs (ExtraFS, 100KB) + /ifs (InternalFS, 28KB)
- *           using native Zephyr LittleFS (block_size=4096).
- *   Others: DTS-automounted /lfs (single partition).
- *   QSPI:   /ext overrides contacts mount when available.
- *
- * Data format (all platforms):
- *   contacts3   — 152-byte records
- *   new_prefs   — byte layout
- *   channels2   — 68-byte records
- *   _main.id    — identity blob
- *   adv_blobs   — fixed record array
+ * All platforms use DTS-automounted /lfs.
+ * QSPI /ext overrides contacts mount when available.
  */
 
 #include "ZephyrDataStore.h"
@@ -35,16 +25,9 @@ struct BlobRec {
 	uint8_t data[MAX_ADVERT_PKT_LEN];
 };
 
-/* ── Mount state ────────────────────────────────────────────────────── */
-
-/* Resolved at mount time */
-const char *ZephyrDataStore::_contacts_mnt = nullptr;
-const char *ZephyrDataStore::_prefs_mnt = nullptr;
-
-static bool efs_mounted;   /* /efs (nRF52 ExtraFS) or false */
-static bool ifs_mounted;   /* /ifs (nRF52 InternalFS) or false */
-static bool lfs_mounted;   /* /lfs (DTS automount) or false */
-static bool ext_lfs_mounted; /* /ext (QSPI) */
+/* Track mount status - filesystems are automounted via DTS fstab */
+static bool lfs_mounted;
+static bool ext_lfs_mounted;
 
 /* Check if a filesystem is mounted using fs_statvfs */
 static bool is_mounted(const char *mount_point)
@@ -53,121 +36,28 @@ static bool is_mounted(const char *mount_point)
 	return fs_statvfs(mount_point, &stat) == 0;
 }
 
-/* ── nRF52 dual-mount: ExtraFS + InternalFS ────────────────────────── */
-
-#if FIXED_PARTITION_EXISTS(extrafs_partition) && FIXED_PARTITION_EXISTS(internalfs_partition)
-#define HAS_NRF52_DUAL_MOUNT 1
-
-/* Native Zephyr LFS — block_size derived from flash erase size (4096). */
-FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(extrafs_data);
-FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(internalfs_data);
-
-static struct fs_mount_t extrafs_mnt = {
-	.type = FS_LITTLEFS,
-	.mnt_point = "/efs",
-	.fs_data = &extrafs_data,
-	.storage_dev = (void *)FIXED_PARTITION_ID(extrafs_partition),
-	.flags = 0,
-};
-
-static struct fs_mount_t internalfs_mnt = {
-	.type = FS_LITTLEFS,
-	.mnt_point = "/ifs",
-	.fs_data = &internalfs_data,
-	.storage_dev = (void *)FIXED_PARTITION_ID(internalfs_partition),
-	.flags = 0,
-};
-
-/* Mount a LittleFS partition, format if mount fails.  Returns the mount rc. */
-static int mount_or_format(struct fs_mount_t *mnt, int partition_id)
-{
-	int rc = fs_mount(mnt);
-
-	if (rc < 0) {
-		LOG_WRN("%s: mount failed (%d) — formatting", mnt->mnt_point, rc);
-
-		/* A failed fs_mount may leave fs->backend set (flash_area
-		 * opened in littlefs_init_backend but lfs_mount failed).
-		 * Clear it so the retry doesn't hit -EBUSY. */
-		struct fs_littlefs *fsd = (struct fs_littlefs *)mnt->fs_data;
-		if (fsd->backend) {
-			flash_area_close((const struct flash_area *)fsd->backend);
-			fsd->backend = NULL;
-		}
-
-		const struct flash_area *fap;
-		if (flash_area_open(partition_id, &fap) == 0) {
-			flash_area_flatten(fap, 0, fap->fa_size);
-			flash_area_close(fap);
-		}
-		rc = fs_mount(mnt);
-		if (rc < 0) {
-			LOG_ERR("%s: mount failed after format: %d",
-				mnt->mnt_point, rc);
-		}
-	}
-	return rc;
-}
-
-static bool try_mount_nrf52_dual()
-{
-	/* Mount ExtraFS — contacts, channels, blobs */
-	if (mount_or_format(&extrafs_mnt,
-			    FIXED_PARTITION_ID(extrafs_partition)) < 0) {
-		return false;
-	}
-	efs_mounted = true;
-	LOG_INF("ExtraFS at /efs: blk_sz=%u blk_cnt=%u",
-		extrafs_data.cfg.block_size, extrafs_data.cfg.block_count);
-
-	/* Mount InternalFS — prefs, identity, BLE settings */
-	if (mount_or_format(&internalfs_mnt,
-			    FIXED_PARTITION_ID(internalfs_partition)) < 0) {
-		return false;
-	}
-	ifs_mounted = true;
-	LOG_INF("InternalFS at /ifs: blk_sz=%u blk_cnt=%u",
-		internalfs_data.cfg.block_size, internalfs_data.cfg.block_count);
-
-	return true;
-}
-
-#else
-#define HAS_NRF52_DUAL_MOUNT 0
-static bool try_mount_nrf52_dual() { return false; }
-#endif /* extrafs_partition && internalfs_partition */
-
-/* ── Universal mount ───────────────────────────────────────────────── */
-
 bool ZephyrDataStore::mount()
 {
-	if (_contacts_mnt != nullptr) {
-		return true;  /* already mounted */
+	if (lfs_mounted) {
+		return true;
 	}
 
-	/* 1. Try nRF52 dual-mount (manual, native block_size) */
-	if (try_mount_nrf52_dual()) {
-		_contacts_mnt = "/efs";
-		_prefs_mnt = "/ifs";
-		LOG_INF("nRF52 dual-mount: contacts=/efs, prefs=/ifs");
-	}
-	/* 2. Fallback: DTS automount at /lfs (ESP32, MG24, nRF54L) */
-	else if (is_mounted("/lfs")) {
-		_contacts_mnt = "/lfs";
-		_prefs_mnt = "/lfs";
+	/* Check if internal LFS was automounted */
+	if (is_mounted(mountPoint())) {
 		lfs_mounted = true;
-		LOG_INF("Single-mount: contacts=/lfs, prefs=/lfs (DTS automount)");
-	}
-	else {
-		LOG_ERR("No filesystem mounted!");
+		LOG_INF("Internal LittleFS at %s (automounted)", mountPoint());
+	} else {
+		LOG_ERR("Internal LittleFS NOT mounted at %s - check DTS fstab!", mountPoint());
 		return false;
 	}
 
-	/* 3. QSPI /ext override (optional, any platform) */
-	if (is_mounted(EXT_MNT_POINT)) {
+	/* Check if external QSPI was automounted */
+	if (is_mounted(extMountPoint())) {
 		ext_lfs_mounted = true;
-		_contacts_mnt = EXT_MNT_POINT;
-		LOG_INF("QSPI mounted at /ext — contacts redirected to QSPI");
+		LOG_INF("External QSPI LittleFS at %s (automounted, 100 blobs)", extMountPoint());
+	} else {
+		ext_lfs_mounted = false;
+		LOG_WRN("External QSPI NOT mounted at %s - using internal only (20 blobs)", extMountPoint());
 	}
 
 	return true;
@@ -175,59 +65,10 @@ bool ZephyrDataStore::mount()
 
 void ZephyrDataStore::unmount()
 {
-#if HAS_NRF52_DUAL_MOUNT
-	if (efs_mounted) {
-		fs_unmount(&extrafs_mnt);
-		efs_mounted = false;
-	}
-	if (ifs_mounted) {
-		fs_unmount(&internalfs_mnt);
-		ifs_mounted = false;
-	}
-#endif
+	/* With automount, filesystems are managed by Zephyr - just clear our flags */
 	lfs_mounted = false;
 	ext_lfs_mounted = false;
-	_contacts_mnt = nullptr;
-	_prefs_mnt = nullptr;
 }
-
-/* ── Path helpers ──────────────────────────────────────────────────── */
-
-static char path_buf[3][48];  /* reusable path buffers */
-
-const char *ZephyrDataStore::contactsFile() const
-{
-	snprintf(path_buf[0], sizeof(path_buf[0]), "%s/contacts3", _contacts_mnt);
-	return path_buf[0];
-}
-
-const char *ZephyrDataStore::channelsFile() const
-{
-	snprintf(path_buf[1], sizeof(path_buf[1]), "%s/channels2", _contacts_mnt);
-	return path_buf[1];
-}
-
-const char *ZephyrDataStore::advBlobsFile() const
-{
-	snprintf(path_buf[2], sizeof(path_buf[2]), "%s/adv_blobs", _contacts_mnt);
-	return path_buf[2];
-}
-
-const char *ZephyrDataStore::prefsFile()
-{
-	static char buf[48];
-	snprintf(buf, sizeof(buf), "%s/new_prefs", _prefs_mnt);
-	return buf;
-}
-
-const char *ZephyrDataStore::identityFile()
-{
-	static char buf[48];
-	snprintf(buf, sizeof(buf), "%s/_main.id", _prefs_mnt);
-	return buf;
-}
-
-/* ── Init ──────────────────────────────────────────────────────────── */
 
 ZephyrDataStore::ZephyrDataStore(mesh::RTCClock &clock)
 	: _clock(&clock), _has_ext_fs(false)
@@ -237,17 +78,36 @@ ZephyrDataStore::ZephyrDataStore(mesh::RTCClock &clock)
 void ZephyrDataStore::begin()
 {
 	_has_ext_fs = ext_lfs_mounted;
-	LOG_INF("_has_ext_fs=%d, contacts_mnt=%s, prefs_mnt=%s",
-		_has_ext_fs ? 1 : 0, _contacts_mnt, _prefs_mnt);
-	LOG_INF("contacts=%s, prefs=%s", contactsFile(), prefsFile());
+	LOG_INF("_has_ext_fs=%d (ext_lfs_mounted=%d)", _has_ext_fs ? 1 : 0, ext_lfs_mounted ? 1 : 0);
+	LOG_INF("contacts path=%s, channels path=%s", contactsFile(), channelsFile());
 
 	if (_has_ext_fs) {
 		migrateToExternalFS();
 	}
 
+	/* Clean up stale .tmp files from interrupted saves.
+	 * If a .tmp file exists, the save was interrupted before the
+	 * atomic rename — the original file is still intact. */
+	cleanStaleTmpFiles();
+
 	checkAdvBlobFile();
 }
 
+void ZephyrDataStore::cleanStaleTmpFiles()
+{
+	const char *paths[] = { contactsFile(), channelsFile(), advBlobsFile() };
+	char tmp_path[48];
+	for (size_t i = 0; i < ARRAY_SIZE(paths); i++) {
+		snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", paths[i]);
+		struct fs_dirent ent;
+		if (fs_stat(tmp_path, &ent) == 0) {
+			LOG_INF("PREVIOUS REBOOT CORRUPTED FS! "
+				"Deleting temp file: %s (%zu bytes)",
+				tmp_path, ent.size);
+			fs_unlink(tmp_path);
+		}
+	}
+}
 
 bool ZephyrDataStore::exists(const char *path)
 {
@@ -264,7 +124,8 @@ bool ZephyrDataStore::openRead(const char *path, uint8_t *buf, size_t buf_sz, si
 {
 	struct fs_file_t file;
 	fs_file_t_init(&file);
-	if (fs_open(&file, path, FS_O_READ) < 0) {
+	int rc = fs_open(&file, path, FS_O_READ);
+	if (rc < 0) {
 		return false;
 	}
 	ssize_t n = fs_read(&file, buf, buf_sz);
@@ -278,12 +139,13 @@ bool ZephyrDataStore::openRead(const char *path, uint8_t *buf, size_t buf_sz, si
 
 bool ZephyrDataStore::openWrite(const char *path, const uint8_t *buf, size_t len)
 {
+	fs_unlink(path);
+
 	struct fs_file_t file;
 	fs_file_t_init(&file);
-	if (exists(path)) {
-		fs_unlink(path);
-	}
-	if (fs_open(&file, path, FS_O_CREATE | FS_O_WRITE) < 0) {
+	int rc = fs_open(&file, path, FS_O_CREATE | FS_O_WRITE);
+	if (rc < 0) {
+		LOG_ERR("openWrite: fs_open(%s) failed: %d", path, rc);
 		return false;
 	}
 	ssize_t n = fs_write(&file, buf, len);
@@ -322,48 +184,32 @@ bool ZephyrDataStore::copyFile(const char *src, const char *dst)
 	return ok && n >= 0;
 }
 
-/* ── QSPI migration ───────────────────────────────────────────────── */
-
 void ZephyrDataStore::migrateToExternalFS()
 {
-	/* Build internal paths (contacts are on the non-QSPI internal mount).
-	 * On nRF52: /efs/contacts3, on others: /lfs/contacts3 */
-	const char *int_mnt = efs_mounted ? "/efs" : "/lfs";
-	char int_contacts[48], ext_contacts[48];
-	char int_channels[48], ext_channels[48];
-	char int_blobs[48], ext_blobs[48];
-
-	snprintf(int_contacts, sizeof(int_contacts), "%s/contacts3", int_mnt);
-	snprintf(ext_contacts, sizeof(ext_contacts), "%s/contacts3", EXT_MNT_POINT);
-	snprintf(int_channels, sizeof(int_channels), "%s/channels2", int_mnt);
-	snprintf(ext_channels, sizeof(ext_channels), "%s/channels2", EXT_MNT_POINT);
-	snprintf(int_blobs, sizeof(int_blobs), "%s/adv_blobs", int_mnt);
-	snprintf(ext_blobs, sizeof(ext_blobs), "%s/adv_blobs", EXT_MNT_POINT);
-
-	/* Migrate contacts */
-	if (!exists(ext_contacts) && exists(int_contacts)) {
-		LOG_INF("Migrating contacts to QSPI");
-		if (copyFile(int_contacts, ext_contacts)) {
-			removeFile(int_contacts);
+	/* Migrate contacts from internal to external if not present */
+	if (!exists(EXT_CONTACTS_FILE) && exists(INT_CONTACTS_FILE)) {
+		LOG_INF("Migrating contacts to external storage");
+		if (copyFile(INT_CONTACTS_FILE, EXT_CONTACTS_FILE)) {
+			removeFile(INT_CONTACTS_FILE);
 		}
 	}
 
 	/* Migrate channels */
-	if (!exists(ext_channels) && exists(int_channels)) {
+	if (!exists(EXT_CHANNELS_FILE) && exists(INT_CHANNELS_FILE)) {
 		LOG_INF("Migrating channels to QSPI");
-		if (copyFile(int_channels, ext_channels)) {
-			removeFile(int_channels);
+		if (copyFile(INT_CHANNELS_FILE, EXT_CHANNELS_FILE)) {
+			removeFile(INT_CHANNELS_FILE);
 		}
 	}
 
 	/* Migrate adv_blobs (extend to 100 records) */
-	if (!exists(ext_blobs) && exists(int_blobs)) {
+	if (!exists(EXT_ADV_BLOBS_FILE) && exists(INT_ADV_BLOBS_FILE)) {
 		LOG_INF("Migrating adv_blobs to QSPI (20 -> 100 slots)");
-		if (copyFile(int_blobs, ext_blobs)) {
-			removeFile(int_blobs);
+		if (copyFile(INT_ADV_BLOBS_FILE, EXT_ADV_BLOBS_FILE)) {
+			removeFile(INT_ADV_BLOBS_FILE);
 			struct fs_file_t file;
 			fs_file_t_init(&file);
-			if (fs_open(&file, ext_blobs, FS_O_RDWR) == 0) {
+			if (fs_open(&file, EXT_ADV_BLOBS_FILE, FS_O_RDWR) == 0) {
 				fs_seek(&file, 0, FS_SEEK_END);
 				BlobRec zeroes;
 				memset(&zeroes, 0, sizeof(zeroes));
@@ -376,14 +222,14 @@ void ZephyrDataStore::migrateToExternalFS()
 	}
 
 	/* Clean up old files on internal if they exist on external */
-	if (exists(ext_contacts) && exists(int_contacts)) {
-		removeFile(int_contacts);
+	if (exists(EXT_CONTACTS_FILE) && exists(INT_CONTACTS_FILE)) {
+		removeFile(INT_CONTACTS_FILE);
 	}
-	if (exists(ext_channels) && exists(int_channels)) {
-		removeFile(int_channels);
+	if (exists(EXT_CHANNELS_FILE) && exists(INT_CHANNELS_FILE)) {
+		removeFile(INT_CHANNELS_FILE);
 	}
-	if (exists(ext_blobs) && exists(int_blobs)) {
-		removeFile(int_blobs);
+	if (exists(EXT_ADV_BLOBS_FILE) && exists(INT_ADV_BLOBS_FILE)) {
+		removeFile(INT_ADV_BLOBS_FILE);
 	}
 }
 
@@ -419,28 +265,7 @@ bool ZephyrDataStore::formatFileSystem()
 	const struct flash_area *fap;
 	int rc;
 
-#if FIXED_PARTITION_EXISTS(extrafs_partition)
-	/* nRF52: format ExtraFS */
-	rc = flash_area_open(FIXED_PARTITION_ID(extrafs_partition), &fap);
-	if (rc == 0) {
-		LOG_INF("Formatting ExtraFS (%u bytes)", (unsigned)fap->fa_size);
-		flash_area_flatten(fap, 0, fap->fa_size);
-		flash_area_close(fap);
-	}
-#endif
-
-#if FIXED_PARTITION_EXISTS(internalfs_partition)
-	/* nRF52: format InternalFS */
-	rc = flash_area_open(FIXED_PARTITION_ID(internalfs_partition), &fap);
-	if (rc == 0) {
-		LOG_INF("Formatting InternalFS (%u bytes)", (unsigned)fap->fa_size);
-		flash_area_flatten(fap, 0, fap->fa_size);
-		flash_area_close(fap);
-	}
-#endif
-
 #if FIXED_PARTITION_EXISTS(lfs_partition)
-	/* Non-nRF52: format single LFS partition */
 	rc = flash_area_open(FIXED_PARTITION_ID(lfs_partition), &fap);
 	if (rc == 0) {
 		LOG_INF("Formatting LFS partition (%u bytes)", (unsigned)fap->fa_size);
@@ -450,7 +275,6 @@ bool ZephyrDataStore::formatFileSystem()
 #endif
 
 #if FIXED_PARTITION_EXISTS(storage_partition)
-	/* Non-nRF52: format NVS storage (BLE bonds) */
 	rc = flash_area_open(FIXED_PARTITION_ID(storage_partition), &fap);
 	if (rc == 0) {
 		LOG_INF("Formatting NVS storage (%u bytes)", (unsigned)fap->fa_size);
@@ -490,7 +314,7 @@ bool ZephyrDataStore::loadMainIdentity(mesh::LocalIdentity &identity)
 {
 	uint8_t buf[PRV_KEY_SIZE + PUB_KEY_SIZE + 32];
 	size_t len = 0;
-	if (!openRead(identityFile(), buf, sizeof(buf), len) || len < PRV_KEY_SIZE + PUB_KEY_SIZE) {
+	if (!openRead(MAIN_ID_FILE, buf, sizeof(buf), len) || len < PRV_KEY_SIZE + PUB_KEY_SIZE) {
 		return false;
 	}
 	return identity.readFrom(buf, len);
@@ -503,16 +327,15 @@ bool ZephyrDataStore::saveMainIdentity(const mesh::LocalIdentity &identity)
 	if (n == 0) {
 		return false;
 	}
-	return openWrite(identityFile(), buf, n);
+	return openWrite(MAIN_ID_FILE, buf, n);
 }
 
-/* ── Preferences (Arduino-compatible layout) ───────────────────────── */
+/* ── Preferences ───────────────────────────────────────────────────── */
 
 void ZephyrDataStore::loadPrefs(NodePrefs &prefs)
 {
-	const char *path = prefsFile();
-	bool prefs_exists = exists(path);
-	LOG_INF("loadPrefs: exists(%s)=%d", path, prefs_exists ? 1 : 0);
+	bool prefs_exists = exists(PREFS_FILE);
+	LOG_INF("loadPrefs: exists(%s)=%d", PREFS_FILE, prefs_exists ? 1 : 0);
 	if (!prefs_exists) {
 		LOG_WRN("loadPrefs: no prefs file found");
 		return;
@@ -520,7 +343,7 @@ void ZephyrDataStore::loadPrefs(NodePrefs &prefs)
 
 	uint8_t buf[256];
 	size_t len = 0;
-	if (!openRead(path, buf, sizeof(buf), len)) {
+	if (!openRead(PREFS_FILE, buf, sizeof(buf), len)) {
 		LOG_WRN("loadPrefs: read failed");
 		return;
 	}
@@ -528,7 +351,7 @@ void ZephyrDataStore::loadPrefs(NodePrefs &prefs)
 		LOG_WRN("loadPrefs: file too small (%d bytes, need 88)", (int)len);
 		return;
 	}
-	LOG_INF("loadPrefs: loaded %d bytes from %s", (int)len, path);
+	LOG_INF("loadPrefs: loaded %d bytes from %s", (int)len, PREFS_FILE);
 
 	size_t off = 0;
 	memcpy(&prefs.airtime_factor, &buf[off], sizeof(float));
@@ -632,9 +455,9 @@ void ZephyrDataStore::savePrefs(const NodePrefs &prefs)
 	buf[off++] = prefs.rx_boost;
 	/* Total: 93 bytes (Arduino reads 92, ZephCore reads 93) */
 
-	bool ok = openWrite(prefsFile(), buf, off);
+	bool ok = openWrite(PREFS_FILE, buf, off);
 	LOG_INF("savePrefs: wrote %s, ok=%d (%d bytes), name='%.16s'",
-		prefsFile(), ok ? 1 : 0, (int)off, prefs.node_name);
+		PREFS_FILE, ok ? 1 : 0, (int)off, prefs.node_name);
 }
 
 /* ── Contacts: contacts3 (152B records, Arduino-compatible) ────────── */
@@ -902,40 +725,21 @@ bool ZephyrDataStore::deleteBlobByKey(const uint8_t key[], int key_len)
 uint32_t ZephyrDataStore::getStorageUsedKb() const
 {
 	struct fs_statvfs sbuf;
-	uint32_t used = 0;
-
-	/* Primary contacts mount (/efs, /lfs, or /ext) */
-	if (_contacts_mnt && fs_statvfs(_contacts_mnt, &sbuf) == 0) {
-		uint32_t total = sbuf.f_blocks * sbuf.f_frsize;
-		uint32_t free = sbuf.f_bfree * sbuf.f_frsize;
-		used += (total - free) / 1024;
+	if (fs_statvfs(MNT_POINT, &sbuf) != 0) {
+		return 0;
 	}
-
-	/* Prefs mount (if different from contacts) */
-	if (_prefs_mnt && _prefs_mnt != _contacts_mnt &&
-	    fs_statvfs(_prefs_mnt, &sbuf) == 0) {
-		uint32_t total = sbuf.f_blocks * sbuf.f_frsize;
-		uint32_t free = sbuf.f_bfree * sbuf.f_frsize;
-		used += (total - free) / 1024;
-	}
-
-	return used;
+	uint32_t total = sbuf.f_blocks * sbuf.f_frsize;
+	uint32_t free = sbuf.f_bfree * sbuf.f_frsize;
+	return (total - free) / 1024;
 }
 
 uint32_t ZephyrDataStore::getStorageTotalKb() const
 {
 	struct fs_statvfs sbuf;
-	uint32_t total = 0;
-
-	if (_contacts_mnt && fs_statvfs(_contacts_mnt, &sbuf) == 0) {
-		total += (sbuf.f_blocks * sbuf.f_frsize) / 1024;
+	if (fs_statvfs(MNT_POINT, &sbuf) != 0) {
+		return 0;
 	}
-	if (_prefs_mnt && _prefs_mnt != _contacts_mnt &&
-	    fs_statvfs(_prefs_mnt, &sbuf) == 0) {
-		total += (sbuf.f_blocks * sbuf.f_frsize) / 1024;
-	}
-
-	return total;
+	return (sbuf.f_blocks * sbuf.f_frsize) / 1024;
 }
 
 uint32_t ZephyrDataStore::getExternalStorageKb() const

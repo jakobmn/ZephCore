@@ -54,6 +54,45 @@ function(zephcore_apply_patches PATCH_DIR TARGET_DIR LABEL)
             RESULT_VARIABLE PATCH_CHECK
             ERROR_VARIABLE PATCH_ERR
         )
+        # If forward-apply fails, the tree may have stale patches from a
+        # previous build (west update doesn't reset dirty files).  Extract
+        # the file list from the patch and git-checkout those paths to
+        # restore them to the clean upstream state, then re-check.
+        if(NOT PATCH_CHECK EQUAL 0)
+            execute_process(
+                COMMAND git diff --name-only "${PATCH_FILE}"
+                WORKING_DIRECTORY "${TARGET_DIR}"
+                OUTPUT_VARIABLE _dummy ERROR_QUIET
+            )
+            # git apply --numstat lists affected files (one per line)
+            execute_process(
+                COMMAND git apply --numstat "${PATCH_FILE}"
+                OUTPUT_VARIABLE PATCH_NUMSTAT
+                ERROR_QUIET
+            )
+            # Parse file paths from numstat (format: "adds\tdels\tpath")
+            string(REGEX MATCHALL "[^\t\n]+\t[^\t\n]+\t[^\t\n]+" NUMSTAT_LINES "${PATCH_NUMSTAT}")
+            set(PATCH_PATHS "")
+            foreach(_line ${NUMSTAT_LINES})
+                string(REGEX REPLACE "^[^\t]+\t[^\t]+\t" "" _path "${_line}")
+                list(APPEND PATCH_PATHS "${_path}")
+            endforeach()
+            if(PATCH_PATHS)
+                message(STATUS "  [${LABEL}] Resetting stale files for: ${PATCH_NAME}")
+                execute_process(
+                    COMMAND git checkout -- ${PATCH_PATHS}
+                    WORKING_DIRECTORY "${TARGET_DIR}"
+                    ERROR_QUIET
+                )
+                # Re-check after reset
+                execute_process(
+                    COMMAND git apply --check "${PATCH_FILE}"
+                    WORKING_DIRECTORY "${TARGET_DIR}"
+                    RESULT_VARIABLE PATCH_CHECK
+                    ERROR_VARIABLE PATCH_ERR
+                )
+            endif()
+        endif()
         if(NOT PATCH_CHECK EQUAL 0)
             message(FATAL_ERROR
                 "ZephCore patch FAILED to apply: ${PATCH_NAME}\n"

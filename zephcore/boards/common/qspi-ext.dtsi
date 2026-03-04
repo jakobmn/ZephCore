@@ -13,7 +13,7 @@
  * Usage in board overlay (in addition to partition or filesystem include):
  *   #include "../../common/qspi-ext.dtsi"
  *
- * Works with BOTH nRF52 dual-mount and single /lfs mount boards.
+ * Works with all platforms using /lfs mount.
  */
 
 / {
