@@ -23,23 +23,9 @@ static lr11xx_dio1_callback_t dio1_user_cb = NULL;
 static void *dio1_user_data = NULL;
 static struct lr11xx_hal_context *current_ctx = NULL;
 
-/* Work queue for deferred DIO1 processing
- * SPI operations CANNOT be done from ISR context on nRF52!
- * The GPIO interrupt triggers this work item which runs in thread context.
- */
-static struct k_work dio1_work;
-
 /* BUSY pin interrupt — wakes wait_on_busy() via semaphore instead of polling */
 static struct gpio_callback busy_gpio_cb;
 static K_SEM_DEFINE(busy_sem, 0, 1);
-
-static void dio1_work_handler(struct k_work *work)
-{
-    ARG_UNUSED(work);
-    if (dio1_user_cb) {
-        dio1_user_cb(dio1_user_data);
-    }
-}
 
 static void busy_isr_callback(const struct device *dev, struct gpio_callback *cb,
                                uint32_t pins)
@@ -116,8 +102,9 @@ static lr11xx_hal_status_t check_device_ready(struct lr11xx_hal_context *ctx)
 /**
  * @brief DIO1 GPIO interrupt callback (ISR context)
  *
- * CRITICAL: This runs in ISR context! Cannot do SPI operations here.
- * Instead, we submit work to the system work queue which runs in thread context.
+ * Calls the user callback directly from ISR.  The caller
+ * (lr11xx_lora.c) submits to its own dedicated work queue,
+ * which is ISR-safe via k_work_submit_to_queue().
  */
 static void dio1_isr_callback(const struct device *dev, struct gpio_callback *cb,
                               uint32_t pins)
@@ -126,8 +113,9 @@ static void dio1_isr_callback(const struct device *dev, struct gpio_callback *cb
     ARG_UNUSED(cb);
     ARG_UNUSED(pins);
 
-    /* Defer to work queue - SPI ops not allowed in ISR */
-    k_work_submit(&dio1_work);
+    if (dio1_user_cb) {
+        dio1_user_cb(dio1_user_data);
+    }
 }
 
 /* Public HAL API - called by Semtech driver */
@@ -178,9 +166,6 @@ int lr11xx_hal_init(struct lr11xx_hal_context *ctx)
         LOG_ERR("Failed to configure DIO1: %d", ret);
         return ret;
     }
-
-    /* Initialize DIO1 work queue handler */
-    k_work_init(&dio1_work, dio1_work_handler);
 
     /* Set up DIO1 interrupt callback */
     gpio_init_callback(&dio1_gpio_cb, dio1_isr_callback, BIT(ctx->dio1.pin));

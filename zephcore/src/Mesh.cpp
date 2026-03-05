@@ -36,7 +36,7 @@ bool Mesh::allowPacketForward(const Packet *packet)
 uint32_t Mesh::getRetransmitDelay(const Packet *packet)
 {
 	uint32_t t = (_radio->getEstAirtimeFor(packet->getRawLength()) * 52 / 50) / 2;
-	return _rng->nextInt(0, 3) * t;
+	return _rng->nextInt(0, 7) * t;
 }
 
 uint32_t Mesh::getCADFailRetryDelay() const

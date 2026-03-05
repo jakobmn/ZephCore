@@ -1115,13 +1115,13 @@ void CompanionMesh::onRawDataRecv(mesh::Packet *packet)
 uint32_t CompanionMesh::getRetransmitDelay(const mesh::Packet *packet)
 {
 	uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * 0.5f);
-	return getRNG()->nextInt(0, 5 * t + 1);
+	return getRNG()->nextInt(0, 7 * t + 1);
 }
 
 uint32_t CompanionMesh::getDirectRetransmitDelay(const mesh::Packet *packet)
 {
 	uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * 0.2f);
-	return getRNG()->nextInt(0, 5 * t + 1);
+	return getRNG()->nextInt(0, 7 * t + 1);
 }
 
 uint8_t CompanionMesh::getDutyCyclePercent() const

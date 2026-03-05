@@ -477,12 +477,12 @@ int RepeaterMesh::calcRxDelay(float score, uint32_t air_time) const {
 
 uint32_t RepeaterMesh::getRetransmitDelay(const mesh::Packet* packet) {
     uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.tx_delay_factor);
-    return getRNG()->nextInt(0, 3 * t + 1);
+    return getRNG()->nextInt(0, 7 * t + 1);
 }
 
 uint32_t RepeaterMesh::getDirectRetransmitDelay(const mesh::Packet* packet) {
     uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.direct_tx_delay_factor);
-    return getRNG()->nextInt(0, 3 * t + 1);
+    return getRNG()->nextInt(0, 7 * t + 1);
 }
 
 bool RepeaterMesh::filterRecvFloodPacket(mesh::Packet* pkt) {

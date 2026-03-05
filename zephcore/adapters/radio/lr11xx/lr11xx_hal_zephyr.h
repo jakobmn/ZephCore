@@ -29,7 +29,7 @@ extern "C" {
  * CRITICAL: All SPI operations are protected by spi_mutex. The LR1110 radio is
  * accessed from two threads:
  *   1. Main thread: mesh event loop (noise floor calibration, TX, reconfigure)
- *   2. System work queue: DIO1 interrupt handler (RX packet processing)
+ *   2. Dedicated DIO1 work queue: interrupt handler (RX packet processing)
  * Without the mutex, concurrent SPI access corrupts the LR1110 command/response
  * protocol, causing the BUSY pin to get stuck HIGH permanently.
  */
@@ -76,7 +76,8 @@ typedef void (*lr11xx_dio1_callback_t)(void *user_data);
  * @brief Set DIO1 interrupt callback
  *
  * @param ctx HAL context
- * @param cb Callback function (called from ISR context)
+ * @param cb Callback function (called directly from GPIO ISR context —
+ *           must be ISR-safe, e.g. k_work_submit_to_queue())
  * @param user_data User data passed to callback
  */
 void lr11xx_hal_set_dio1_callback(struct lr11xx_hal_context *ctx,
