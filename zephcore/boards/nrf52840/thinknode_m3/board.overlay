@@ -2,7 +2,7 @@
  * ThinkNode M3 board overlay - additional ZephCore-specific configuration
  * SPDX-License-Identifier: Apache-2.0
  *
- * GPS control pins for the GPS module (chip TBD, generic NMEA at 9600 baud):
+ * GPS control pins for the GPS module (generic NMEA at 9600 baud):
  * - GPS_POWER (P0.14) - Main power enable (always HIGH, gpio-hog)
  * - GPS_EN    (P0.21) - Standby control (HIGH = awake, LOW = standby)
  * - GPS_RESET (P0.25) - Reset (GPS_RESET_ACTIVE = LOW, REINIT pin)
@@ -15,7 +15,7 @@
  */
 
 / {
-	/* GPS standby control - P0.21 (GPS_EN, HIGH = active/awake) */
+	/* GPS standby control - P0.21 (GPS_EN, HIGH = active/awake, LOW = standby) */
 	gps_en: gps-enable {
 		compatible = "gpio-leds";
 		gps_enable_pin: gps_enable {
@@ -24,8 +24,20 @@
 		};
 	};
 
+	/* GPS hardware reset - P0.25 (GPS_RESET, active-LOW)
+	 * Asserted (pin LOW) on standby entry to halt the module cleanly.
+	 * Released (pin HIGH) after GPS_EN on wake with a brief reset pulse. */
+	gps_rst: gps-reset {
+		compatible = "gpio-leds";
+		gps_reset_pin: gps_reset {
+			gpios = <&gpio0 25 GPIO_ACTIVE_LOW>;
+			label = "GPS Reset";
+		};
+	};
+
 	aliases {
 		gps-enable = &gps_enable_pin;
+		gps-reset  = &gps_reset_pin;
 	};
 };
 
