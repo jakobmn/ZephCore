@@ -52,6 +52,12 @@ public:
     virtual float getFloodDelayFactor() const { return 0.5f; }
     virtual void setBackoffMultiplier(float m) { (void)m; }
 
+    // Adaptive Power Control
+    virtual int8_t getAPCReduction() const { return 0; }
+    virtual float getAPCMargin() const { return 0.0f; }
+    virtual bool isAPCEnabled() const { return true; }
+    virtual void setAPCEnabled(bool en) { (void)en; }
+
     // Sensor manager interface (for GPS)
     virtual double getNodeLat() const { return 0.0; }
     virtual double getNodeLon() const { return 0.0; }

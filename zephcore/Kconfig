@@ -349,6 +349,18 @@ config ZEPHCORE_LORA_RX_DUTY_CYCLE
 
 	  Can be toggled at runtime via CLI "set rxduty on/off".
 
+config ZEPHCORE_APC
+	bool "Adaptive Power Control (APC)"
+	default y
+	help
+	  Automatically reduce TX power when echo packets from neighbors
+	  indicate excess SNR margin. Saves battery and reduces channel
+	  congestion. Ramps back to full power within 2 minutes if no
+	  echoes are heard.
+
+	  Uses rogue-filtering: clusters echo SNRs to avoid one badly
+	  placed high-SNR neighbor from over-reducing power.
+
 endmenu
 
 menu "GPS Configuration"

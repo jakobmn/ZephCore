@@ -807,6 +807,9 @@ void RepeaterMesh::begin(RepeaterDataStore* store) {
      * so we skip loading it here (self_id should already be set). */
     _store->loadPrefs(_prefs);
     _contention.setBackoffMultiplier(_prefs.backoff_multiplier);
+#ifdef CONFIG_ZEPHCORE_APC
+    _power_ctrl.setSF(_prefs.sf);
+#endif
     acl.load(_store->getAclPath(), self_id);
     region_map.load(_store->getRegionsPath());
 

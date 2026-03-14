@@ -29,6 +29,10 @@ public:
 	virtual float getLastRSSI() const { return 0; }
 	virtual float getLastSNR() const { return 0; }
 
+	/* Adaptive Power Control */
+	virtual void setTxPowerReduction(int8_t reduction_db) { (void)reduction_db; }
+	virtual int8_t getTxPowerReduction() const { return 0; }
+
 	/* Packet statistics */
 	virtual uint32_t getPacketsRecv() const { return 0; }
 	virtual uint32_t getPacketsSent() const { return 0; }

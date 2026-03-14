@@ -73,6 +73,10 @@ public:
 	void setRxBoost(bool enable);
 	bool isRxBoostEnabled() const { return _rx_boost_enabled; }
 
+	/* Adaptive Power Control */
+	void setTxPowerReduction(int8_t reduction_db) override { _tx_power_reduction_db = reduction_db; }
+	int8_t getTxPowerReduction() const override { return _tx_power_reduction_db; }
+
 protected:
 	/* ── Hardware primitives — subclass MUST implement ─────────── */
 
@@ -149,6 +153,7 @@ protected:
 	/* Power saving */
 	bool _rx_duty_cycle_enabled;
 	bool _rx_boost_enabled;
+	int8_t _tx_power_reduction_db;
 
 	/* Config cache — skip redundant hwConfigure() on TX↔RX transitions */
 	struct lora_modem_config _last_cfg;

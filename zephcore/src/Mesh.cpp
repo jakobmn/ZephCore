@@ -30,7 +30,12 @@ void Mesh::loop()
 void Mesh::maintenanceLoop()
 {
 	Dispatcher::maintenanceLoop();
-	_contention.tick((uint32_t)_ms->getMillis());
+	uint32_t now = (uint32_t)_ms->getMillis();
+	_contention.tick(now);
+#ifdef CONFIG_ZEPHCORE_APC
+	_power_ctrl.tick(now);
+	_radio->setTxPowerReduction(_power_ctrl.getPowerReduction());
+#endif
 }
 
 void Mesh::extendPendingRetransmit(uint32_t hash32)
@@ -93,6 +98,9 @@ DispatcherAction Mesh::routeRecvPacket(Packet *packet)
 		packet->setPathHashCount(n + 1);
 		uint32_t h = ContentionTracker::computePacketHash32(packet);
 		_contention.trackRetransmit(h, (uint32_t)_ms->getMillis());
+#ifdef CONFIG_ZEPHCORE_APC
+		_power_ctrl.trackTransmit(h, (uint32_t)_ms->getMillis());
+#endif
 		uint32_t d = getRetransmitDelay(packet);
 		return ACTION_RETRANSMIT_DELAYED(packet->getPathHashCount(), d);  // give priority to closer sources
 	}
@@ -204,6 +212,10 @@ DispatcherAction Mesh::onRecvPacket(Packet *pkt)
 	/* Record dupes for contention tracking + reactive backoff */
 	if (pkt->isRouteFlood()) {
 		uint32_t h = ContentionTracker::computePacketHash32(pkt);
+#ifdef CONFIG_ZEPHCORE_APC
+		uint8_t first_hop = (pkt->getPathHashCount() > 0) ? pkt->path[0] : 0;
+		_power_ctrl.recordEcho(h, pkt->_snr, first_hop, (uint32_t)_ms->getMillis());
+#endif
 		if (_contention.recordDupeIfTracked(h, (uint32_t)_ms->getMillis())) {
 			extendPendingRetransmit(h);
 		}
@@ -460,6 +472,12 @@ void Mesh::sendFlood(Packet *packet, uint32_t delay_millis, uint8_t path_hash_si
 	packet->header |= ROUTE_TYPE_FLOOD;
 	packet->setPathHashSizeAndCount(path_hash_size, 0);
 	_tables->hasSeen(packet);
+#ifdef CONFIG_ZEPHCORE_APC
+	{
+		uint32_t h = ContentionTracker::computePacketHash32(packet);
+		_power_ctrl.trackTransmit(h, (uint32_t)_ms->getMillis());
+	}
+#endif
 
 	uint8_t pri;
 	if (packet->getPayloadType() == PAYLOAD_TYPE_PATH) {
@@ -489,6 +507,12 @@ void Mesh::sendFlood(Packet *packet, uint16_t *transport_codes, uint32_t delay_m
 	packet->transport_codes[1] = transport_codes[1];
 	packet->setPathHashSizeAndCount(path_hash_size, 0);
 	_tables->hasSeen(packet);
+#ifdef CONFIG_ZEPHCORE_APC
+	{
+		uint32_t h = ContentionTracker::computePacketHash32(packet);
+		_power_ctrl.trackTransmit(h, (uint32_t)_ms->getMillis());
+	}
+#endif
 
 	uint8_t pri;
 	if (packet->getPayloadType() == PAYLOAD_TYPE_PATH) {

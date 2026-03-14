@@ -7,6 +7,9 @@
 
 #include <mesh/Dispatcher.h>
 #include <mesh/ContentionTracker.h>
+#ifdef CONFIG_ZEPHCORE_APC
+#include <mesh/PowerController.h>
+#endif
 #include <mesh/RTC.h>
 
 namespace mesh {
@@ -35,6 +38,11 @@ protected:
 	ContentionTracker _contention;
 	ContentionTracker& getContentionTracker() { return _contention; }
 	const ContentionTracker& getContentionTracker() const { return _contention; }
+#ifdef CONFIG_ZEPHCORE_APC
+	PowerController _power_ctrl;
+	PowerController& getPowerController() { return _power_ctrl; }
+	const PowerController& getPowerController() const { return _power_ctrl; }
+#endif
 	void extendPendingRetransmit(uint32_t hash32);
 
 	DispatcherAction onRecvPacket(Packet *pkt) override;

@@ -183,6 +183,9 @@ CompanionMesh::CompanionMesh(mesh::Radio &radio, mesh::MillisecondClock &ms, mes
 void CompanionMesh::begin()
 {
 	BaseChatMesh::begin();
+#ifdef CONFIG_ZEPHCORE_APC
+	_power_ctrl.setSF(prefs.sf);
+#endif
 }
 
 bool CompanionMesh::allowPacketForward(const mesh::Packet *packet)
@@ -1777,6 +1780,9 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 				prefs.cr = cr;
 				prefs.client_repeat = repeat;
 				_store->savePrefs(prefs);
+#ifdef CONFIG_ZEPHCORE_APC
+				_power_ctrl.setSF(sf);
+#endif
 				if (_radio_reconfig_cb) _radio_reconfig_cb();
 				LOG_INF("SET_RADIO_PARAMS: client_repeat=%d", repeat);
 				sendPacketOk();

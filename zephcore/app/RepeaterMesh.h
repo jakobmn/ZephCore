@@ -197,6 +197,22 @@ public:
         getContentionTracker().setBackoffMultiplier(m);
     }
 
+#ifdef CONFIG_ZEPHCORE_APC
+    /* Adaptive Power Control callbacks */
+    int8_t getAPCReduction() const override {
+        return getPowerController().getPowerReduction();
+    }
+    float getAPCMargin() const override {
+        return getPowerController().getMarginEstimate();
+    }
+    bool isAPCEnabled() const override {
+        return getPowerController().isEnabled();
+    }
+    void setAPCEnabled(bool en) override {
+        getPowerController().setEnabled(en);
+    }
+#endif
+
     void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
     void loop();
 

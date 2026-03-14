@@ -361,6 +361,7 @@ target_sources(app PRIVATE
   src/ContentionTracker.cpp
   src/Dispatcher.cpp
   src/Identity.cpp
+  $<$<BOOL:${CONFIG_ZEPHCORE_APC}>:src/PowerController.cpp>
   src/Mesh.cpp
   src/Packet.cpp
   src/StaticPoolPacketManager.cpp

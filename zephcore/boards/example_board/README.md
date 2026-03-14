@@ -186,6 +186,8 @@ should ONLY contain settings that can't be inferred from hardware:
     CONFIG_SPI                          Auto from ZEPHCORE_RADIO_LR1110
     CONFIG_NORDIC_QSPI_NOR             Auto from DT nordic,qspi-nor node
     CONFIG_ZEPHCORE_LORA_RX_DUTY_CYCLE  Auto: ON for companion+SX1262, OFF for repeater/LR1110
+    CONFIG_ZEPHCORE_APC                 Adaptive Power Control — ON by default for all boards/roles.
+                                        Set to n in board.conf to disable for a specific board.
 
 
 Config Inheritance

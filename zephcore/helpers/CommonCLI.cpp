@@ -428,6 +428,17 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
             float ff = _callbacks->getFloodDelayFactor();
             snprintf(reply, CLI_REPLY_SIZE, "> adaptive (est=%.1f flood=%.2f)",
                      (double)est, (double)ff);
+        } else if (memcmp(config, "txpower", 7) == 0) {
+            if (_callbacks->isAPCEnabled()) {
+                int8_t apc = _callbacks->getAPCReduction();
+                float margin = _callbacks->getAPCMargin();
+                int effective = (int)_prefs->tx_power_dbm - (int)apc;
+                snprintf(reply, CLI_REPLY_SIZE, "> %ddBm (max=%d apc=-%d margin=%.1f)",
+                         effective, (int)_prefs->tx_power_dbm, (int)apc, (double)margin);
+            } else {
+                snprintf(reply, CLI_REPLY_SIZE, "> %ddBm (apc=off)",
+                         (int)_prefs->tx_power_dbm);
+            }
         } else if (memcmp(config, "flood.max", 9) == 0) {
             snprintf(reply, CLI_REPLY_SIZE, "> %u", (uint32_t)_prefs->flood_max);
         } else if (memcmp(config, "direct.txdelay", 14) == 0) {
@@ -659,16 +670,24 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
                 strcpy(reply, "OK");
             }
         } else if (memcmp(config, "tx ", 3) == 0) {
-            int val = atoi(&config[3]);
+            if (memcmp(&config[3], "apc", 3) == 0) {
+                _callbacks->setAPCEnabled(true);
+                snprintf(reply, CLI_REPLY_SIZE, "OK - tx power=%d dBm (apc=on)",
+                         (int)_prefs->tx_power_dbm);
+            } else {
+                int val = atoi(&config[3]);
 #ifdef CONFIG_ZEPHCORE_MAX_TX_POWER_DBM
-            if (val > CONFIG_ZEPHCORE_MAX_TX_POWER_DBM) {
-                val = CONFIG_ZEPHCORE_MAX_TX_POWER_DBM;
-            }
+                if (val > CONFIG_ZEPHCORE_MAX_TX_POWER_DBM) {
+                    val = CONFIG_ZEPHCORE_MAX_TX_POWER_DBM;
+                }
 #endif
-            _prefs->tx_power_dbm = (int8_t)val;
-            savePrefs();
-            _callbacks->setTxPower(_prefs->tx_power_dbm);
-            snprintf(reply, CLI_REPLY_SIZE, "OK - tx power=%d dBm", (int)_prefs->tx_power_dbm);
+                _prefs->tx_power_dbm = (int8_t)val;
+                savePrefs();
+                _callbacks->setAPCEnabled(false);
+                _callbacks->setTxPower(_prefs->tx_power_dbm);
+                snprintf(reply, CLI_REPLY_SIZE, "OK - tx power=%d dBm (apc=off)",
+                         (int)_prefs->tx_power_dbm);
+            }
         } else if (sender_timestamp == 0 && memcmp(config, "freq ", 5) == 0) {
             _prefs->freq = atof(&config[5]);
             savePrefs();
