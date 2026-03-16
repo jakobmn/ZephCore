@@ -210,7 +210,7 @@ set(ZEPHCORE_COMMON_CONF "${CMAKE_CURRENT_SOURCE_DIR}/boards/common/zephcore_com
 # Detect platform from board name and add platform-specific common config
 # For boards with qualifiers like "wio_tracker_l1/nrf52840", check both the full BOARD
 # string and the BOARD_QUALIFIERS which contains just the qualifier (e.g., "nrf52840")
-if(BOARD MATCHES ".*nrf52.*" OR BOARD MATCHES "rak4631" OR BOARD MATCHES "rak_wismesh_tag" OR BOARD MATCHES "wio_tracker" OR BOARD MATCHES "ikoka_nano" OR BOARD MATCHES "t1000_e" OR BOARD MATCHES "thinknode_m1" OR BOARD MATCHES "thinknode_m3" OR BOARD MATCHES "thinknode_m6")
+if(BOARD MATCHES ".*nrf52.*" OR BOARD MATCHES "rak4631" OR BOARD MATCHES "rak_wismesh_tag" OR BOARD MATCHES "wio_tracker" OR BOARD MATCHES "ikoka_nano" OR BOARD MATCHES "t1000_e" OR BOARD MATCHES "thinknode_m1" OR BOARD MATCHES "thinknode_m3" OR BOARD MATCHES "thinknode_m6" OR BOARD MATCHES "promicro_lr2021")
     set(ZEPHCORE_PLATFORM_CONF "${CMAKE_CURRENT_SOURCE_DIR}/boards/common/nrf52_common.conf")
 elseif(DEFINED BOARD_QUALIFIERS AND BOARD_QUALIFIERS MATCHES ".*nrf52.*")
     set(ZEPHCORE_PLATFORM_CONF "${CMAKE_CURRENT_SOURCE_DIR}/boards/common/nrf52_common.conf")
@@ -394,6 +394,18 @@ if(CONFIG_ZEPHCORE_RADIO_LR1110)
   get_filename_component(ZEPHYR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zephyr ABSOLUTE)
   target_include_directories(app PRIVATE
     ${ZEPHYR_DIR}/drivers/lora/lr11xx
+  )
+elseif(CONFIG_ZEPHCORE_RADIO_LR2021)
+  message(STATUS "ZephCore Radio: LR2021 (Zephyr LoRa driver)")
+  target_sources(app PRIVATE
+    adapters/radio/LR2021Radio.cpp
+  )
+  target_include_directories(app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/adapters/radio/lr20xx
+  )
+  get_filename_component(ZEPHYR_DIR_LR20 ${CMAKE_CURRENT_SOURCE_DIR}/../zephyr ABSOLUTE)
+  target_include_directories(app PRIVATE
+    ${ZEPHYR_DIR_LR20}/drivers/lora/lr20xx
   )
 else()
   # Default: SX126x via native Zephyr LoRa driver

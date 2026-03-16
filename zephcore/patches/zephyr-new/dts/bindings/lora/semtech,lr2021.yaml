@@ -1,0 +1,92 @@
+# Copyright (c) 2025 ZephCore
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Semtech LR2021 LoRa Plus transceiver (4th-gen LoRa IP).
+  Uses native Semtech lr20xx_driver SDK with Zephyr LoRa driver API.
+  Supports sub-GHz + 2.4 GHz ISM + NTN/SATCOM.
+
+compatible: "semtech,lr2021"
+
+include: spi-device.yaml
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO connected to NRESET (active-low).
+
+  busy-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO connected to BUSY (high = busy).
+
+  dio1-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO connected to DIO5/IRQ line (active-high, pull-down).
+
+  tcxo-voltage-mv:
+    type: int
+    default: 0
+    description: |
+      TCXO supply voltage in millivolts (provided by LR2021 DIO3).
+      0 = no TCXO (use XTAL). Common: 1800 (1.8V), 3300 (3.3V).
+
+  tcxo-startup-delay-ms:
+    type: int
+    default: 5
+    description: TCXO startup stabilization time in milliseconds.
+
+  rx-boosted:
+    type: boolean
+    description: Enable RX boosted mode for better sensitivity (+~3dB, +~2mA).
+
+  rfswitch-enable:
+    type: int
+    default: 0
+    description: |
+      RF switch DIO enable bitmask (bit 0 = DIO5, bit 1 = DIO6, ...).
+      Set a bit to include that DIO in RF switch control.
+
+  rfswitch-standby:
+    type: int
+    default: 0
+    description: |
+      Bitmask of RF switch DIOs that are HIGH in standby mode.
+      Bit mapping matches rfswitch-enable.
+
+  rfswitch-rx:
+    type: int
+    default: 0
+    description: |
+      Bitmask of RF switch DIOs that are HIGH in RX mode (both LF and HF).
+      Bit mapping matches rfswitch-enable.
+
+  rfswitch-tx:
+    type: int
+    default: 0
+    description: |
+      Bitmask of RF switch DIOs that are HIGH in sub-GHz TX mode (LF PA).
+      Bit mapping matches rfswitch-enable.
+
+  rfswitch-tx-hp:
+    type: int
+    default: 0
+    description: |
+      Bitmask of RF switch DIOs that are HIGH in 2.4 GHz / high-power TX mode (HF PA).
+      Bit mapping matches rfswitch-enable.
+
+  pa-hp-sel:
+    type: int
+    default: 7
+    description: |
+      LF PA number of slices (0-7). Maps to pa_lf_slices in the SDK.
+      Higher = more PA output slices active = more power. Default 7 = maximum.
+
+  pa-duty-cycle:
+    type: int
+    default: 4
+    description: |
+      LF PA duty cycle (0-7). Maps to pa_lf_duty_cycle in the SDK.
+      Default 4 is suitable for most sub-GHz applications.

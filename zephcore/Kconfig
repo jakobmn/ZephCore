@@ -241,6 +241,15 @@ config ZEPHCORE_RADIO_LR1110
 	  TCXO, RF switch, and PA config are in the device tree.
 	  For any board with an LR1110, LR1120, or LR1121 radio.
 
+config ZEPHCORE_RADIO_LR2021
+	bool "LR2021 (custom driver)"
+	select LORA
+	select SPI
+	help
+	  Semtech LR2021 (LoRa Plus, 4th-gen) via custom ZephCore driver.
+	  Supports sub-GHz + 2.4 GHz ISM + NTN/SATCOM.
+	  TCXO, RF switch, and PA config are in the device tree.
+
 endchoice
 
 config ZEPHCORE_DEFAULT_TX_POWER_DBM
