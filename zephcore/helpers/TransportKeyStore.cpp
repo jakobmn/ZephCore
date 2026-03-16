@@ -28,8 +28,8 @@ uint16_t TransportKey::calcTransportCode(const mesh::Packet* packet) const {
     mbedtls_md_hmac_finish(&ctx, hmac);
     mbedtls_md_free(&ctx);
 
-    /* Extract first 2 bytes as transport code */
-    uint16_t code = (hmac[0] << 8) | hmac[1];
+    /* Extract first 2 bytes as transport code (little-endian, matching Arduino SHA256 finalizeHMAC behavior) */
+    uint16_t code = (uint16_t)hmac[0] | ((uint16_t)hmac[1] << 8);
     if (code == 0) {       // reserve codes 0000 and FFFF
         code++;
     } else if (code == 0xFFFF) {
