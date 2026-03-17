@@ -283,9 +283,10 @@ static void lr20xx_hardware_reset(struct lr20xx_data *data,
 	}
 
 	if (cfg->tcxo_voltage_mv > 0) {
+		/* Timeout in 32 MHz ticks (31.25 ns/tick): 1 ms = 32000 ticks */
 		lr20xx_system_set_tcxo_mode(ctx,
 					    get_tcxo_voltage(cfg->tcxo_voltage_mv),
-					    (cfg->tcxo_startup_delay_ms * 1000) / 31);
+					    cfg->tcxo_startup_delay_ms * 32000U);
 	}
 
 	lr20xx_system_cfg_lfclk(ctx, LR20XX_SYSTEM_LFCLK_RC);
@@ -316,7 +317,7 @@ static void lr20xx_hardware_reset(struct lr20xx_data *data,
 			{ .rx_path = LR20XX_RADIO_COMMON_RX_PATH_LF,
 			  .frequency_in_hertz = 470000000 },
 			{ .rx_path = LR20XX_RADIO_COMMON_RX_PATH_LF,
-			  .frequency_in_hertz = 869618000 },
+			  .frequency_in_hertz = 897500000 },
 			{ .rx_path = LR20XX_RADIO_COMMON_RX_PATH_HF,
 			  .frequency_in_hertz = 2441000000UL },
 		};
@@ -338,19 +339,24 @@ static void lr20xx_apply_modem_config(struct lr20xx_data *data,
 {
 	void *ctx = &data->hal_ctx;
 	struct lora_modem_config *mc = &data->modem_cfg;
+	lr20xx_status_t rc;
 
-	lr20xx_radio_common_set_pkt_type(ctx, LR20XX_RADIO_COMMON_PKT_TYPE_LORA);
+	rc = lr20xx_radio_common_set_pkt_type(ctx, LR20XX_RADIO_COMMON_PKT_TYPE_LORA);
+	LOG_INF("modem_cfg: set_pkt_type=%d", rc);
 
-	lr20xx_radio_common_set_rf_freq(ctx, mc->frequency);
+	rc = lr20xx_radio_common_set_rf_freq(ctx, mc->frequency);
+	LOG_INF("modem_cfg: set_rf_freq(%u)=%d", mc->frequency, rc);
 
 	/* Always configure the RX path after setting frequency
 	 * (reference does this on every set_rf_freq call). */
-	lr20xx_radio_common_set_rx_path(
+	rc = lr20xx_radio_common_set_rx_path(
 		ctx, LR20XX_RADIO_COMMON_RX_PATH_LF,
 		data->rx_boost_enabled
 			? LR20XX_RADIO_COMMON_RX_PATH_BOOST_MODE_4
 			: LR20XX_RADIO_COMMON_RX_PATH_BOOST_MODE_NONE);
 	data->rx_boost_applied = data->rx_boost_enabled;
+	LOG_INF("modem_cfg: set_rx_path(LF, boost=%d)=%d",
+		data->rx_boost_enabled, rc);
 
 	/* LR20xx uses PPM offset instead of explicit LDRO.
 	 * PPM_1_4 (1 bin every 4) is equivalent to LDRO for high-SF
@@ -363,7 +369,9 @@ static void lr20xx_apply_modem_config(struct lr20xx_data *data,
 			(lr20xx_radio_lora_sf_t)mc->datarate,
 			bw_enum_to_lr20xx(mc->bandwidth)),
 	};
-	lr20xx_radio_lora_set_modulation_params(ctx, &mod);
+	rc = lr20xx_radio_lora_set_modulation_params(ctx, &mod);
+	LOG_INF("modem_cfg: set_mod(SF%d BW%d CR%d PPM%d)=%d",
+		mod.sf, mod.bw, mod.cr, mod.ppm, rc);
 
 	/* DCDC errata: reconfigure DCDC switcher after set_modulation_params
 	 * when using DCDC mode at sub-GHz for RX */
@@ -378,10 +386,15 @@ static void lr20xx_apply_modem_config(struct lr20xx_data *data,
 		.iq = mc->iq_inverted ? LR20XX_RADIO_LORA_IQ_INVERTED
 				      : LR20XX_RADIO_LORA_IQ_STANDARD,
 	};
-	lr20xx_radio_lora_set_packet_params(ctx, &pkt);
+	rc = lr20xx_radio_lora_set_packet_params(ctx, &pkt);
+	LOG_INF("modem_cfg: set_pkt(pre=%d len=%d crc=%d iq=%d)=%d",
+		pkt.preamble_len_in_symb, pkt.pld_len_in_bytes,
+		pkt.crc, pkt.iq, rc);
 
-	lr20xx_radio_lora_set_syncword(ctx,
+	rc = lr20xx_radio_lora_set_syncword(ctx,
 				       mc->public_network ? 0x34 : 0x12);
+	LOG_INF("modem_cfg: set_syncword(0x%02x)=%d",
+		mc->public_network ? 0x34 : 0x12, rc);
 
 	if (tx_mode) {
 		/* Use calibrated PA config from Semtech lookup table.
@@ -390,17 +403,30 @@ static void lr20xx_apply_modem_config(struct lr20xx_data *data,
 		int8_t half_power;
 
 		lr20xx_get_pa_cfg_for_power(mc->tx_power, &pa, &half_power);
-		lr20xx_radio_common_set_pa_cfg(ctx, &pa);
+		rc = lr20xx_radio_common_set_pa_cfg(ctx, &pa);
+		LOG_INF("modem_cfg: set_pa_cfg(duty=%d slices=%d)=%d",
+			pa.pa_lf_duty_cycle, pa.pa_lf_slices, rc);
 
-		lr20xx_radio_common_set_tx_params(ctx, half_power,
+		rc = lr20xx_radio_common_set_tx_params(ctx, half_power,
 						  LR20XX_RADIO_COMMON_RAMP_48_US);
+		LOG_INF("modem_cfg: set_tx_params(half_pwr=%d)=%d",
+			half_power, rc);
 	}
 
-	/* Route IRQ events to DIO5 (physical DIO1 pin on the board) */
-	lr20xx_system_set_dio_irq_cfg(ctx, LR20XX_SYSTEM_DIO_5,
-		LR20XX_SYSTEM_IRQ_RX_DONE | LR20XX_SYSTEM_IRQ_TX_DONE |
-		LR20XX_SYSTEM_IRQ_TIMEOUT | LR20XX_SYSTEM_IRQ_CRC_ERROR |
-		LR20XX_SYSTEM_IRQ_LORA_HEADER_ERROR);
+	/* Route all IRQ events except FIFO to DIO5 (physical DIO1 pin),
+	 * matching the Semtech reference: 0xFFFFFFFF & ~(FIFO_RX | FIFO_TX) */
+	rc = lr20xx_system_set_dio_irq_cfg(ctx, LR20XX_SYSTEM_DIO_5,
+		LR20XX_SYSTEM_IRQ_ALL_MASK &
+		~(LR20XX_SYSTEM_IRQ_FIFO_RX | LR20XX_SYSTEM_IRQ_FIFO_TX));
+	LOG_INF("modem_cfg: set_dio_irq=%d", rc);
+
+	/* Read back system errors after full config */
+	lr20xx_system_errors_t errs = 0;
+	lr20xx_system_get_errors(ctx, &errs);
+	if (errs) {
+		LOG_WRN("modem_cfg: sys_errors=0x%04x after config", errs);
+		lr20xx_system_clear_errors(ctx);
+	}
 }
 
 /* ── RX duty cycle ──────────────────────────────────────────────────── */
@@ -485,13 +511,15 @@ static void lr20xx_start_rx(struct lr20xx_data *data,
 			     const struct lr20xx_config *cfg)
 {
 	void *ctx = &data->hal_ctx;
+	lr20xx_status_t rc;
 
-	LOG_DBG("start_rx: t=%lld", k_uptime_get());
+	LOG_INF("start_rx: t=%lld", k_uptime_get());
 
 	/* Standby first — wake from any state (radio_is_sleeping is managed
 	 * by the HAL via sleep opcode detection; do not set it here). */
-	lr20xx_status_t rc = lr20xx_system_set_standby_mode(ctx,
-							    LR20XX_SYSTEM_STANDBY_MODE_RC);
+	rc = lr20xx_system_set_standby_mode(ctx,
+					    LR20XX_SYSTEM_STANDBY_MODE_RC);
+	LOG_INF("start_rx: standby=%d", rc);
 	if (rc != LR20XX_STATUS_OK) {
 		LOG_ERR("standby failed (rc=%d) — triggering HW reset", rc);
 		lr20xx_hardware_reset(data, cfg);
@@ -511,8 +539,9 @@ static void lr20xx_start_rx(struct lr20xx_data *data,
 		lr20xx_apply_rx_duty_cycle(data);
 		/* apply may have disabled duty cycle if preamble too short */
 	} else {
-		lr20xx_radio_common_set_rx_with_timeout_in_rtc_step(
+		rc = lr20xx_radio_common_set_rx_with_timeout_in_rtc_step(
 			ctx, 0xFFFFFF);
+		LOG_INF("start_rx: set_rx(continuous)=%d", rc);
 	}
 
 	/* Clear any IRQ flags set during modem configuration */
@@ -520,6 +549,15 @@ static void lr20xx_start_rx(struct lr20xx_data *data,
 
 	data->in_rx_mode = true;
 	data->tx_active = false;
+
+	/* Check DIO1 state and system errors after entering RX */
+	int dio1 = gpio_pin_get_dt(&data->hal_ctx.dio1);
+	lr20xx_system_errors_t errs = 0;
+	lr20xx_system_get_errors(ctx, &errs);
+	LOG_INF("start_rx: done — DIO1=%d sys_err=0x%04x", dio1, errs);
+	if (errs) {
+		lr20xx_system_clear_errors(ctx);
+	}
 }
 
 /* ── Lightweight RX restart (no modem reconfig) ─────────────────────── */
@@ -722,8 +760,9 @@ static int lr20xx_lora_config(const struct device *dev,
 		.rx_path          = LR20XX_RADIO_COMMON_RX_PATH_LF,
 		.frequency_in_hertz = config->frequency,
 	};
-	lr20xx_radio_common_calibrate_front_end_helper(&data->hal_ctx,
-						       &cal, 1);
+	lr20xx_status_t cal_rc = lr20xx_radio_common_calibrate_front_end_helper(
+		&data->hal_ctx, &cal, 1);
+	LOG_INF("config: FE cal(%uHz)=%d", config->frequency, cal_rc);
 	k_mutex_unlock(&data->spi_mutex);
 
 	LOG_INF("config: %uHz SF%d BW%d CR%d pwr=%d tx=%d",
@@ -913,17 +952,22 @@ bool lr20xx_is_receiving(const struct device *dev)
 {
 	struct lr20xx_data *data = dev->data;
 
-	/* LR20xx has no non-destructive IRQ read (only get_and_clear).
-	 * Consuming bits here races with the DIO1 work handler — RX_DONE
-	 * could be cleared before the handler delivers the packet.
-	 * Use radio state flags as proxy: radio is "receiving" if in
-	 * continuous RX, not in TX, and DIO1 is not asserted (asserted
-	 * means a completion event is pending, not a mid-preamble state). */
 	if (!data->in_rx_mode || data->tx_active) {
 		return false;
 	}
 
-	return !gpio_pin_get_dt(&data->hal_ctx.dio1);
+	/* Use non-destructive get_status to check for preamble/header
+	 * without racing the DIO1 work handler. */
+	if (k_mutex_lock(&data->spi_mutex, K_NO_WAIT) != 0) {
+		return false;
+	}
+
+	lr20xx_system_irq_mask_t irq = 0;
+	lr20xx_system_get_status(&data->hal_ctx, NULL, NULL, &irq);
+	k_mutex_unlock(&data->spi_mutex);
+
+	return (irq & (LR20XX_SYSTEM_IRQ_PREAMBLE_DETECTED |
+		       LR20XX_SYSTEM_IRQ_SYNC_WORD_HEADER_VALID)) != 0;
 }
 
 void lr20xx_set_rx_duty_cycle(const struct device *dev, bool enable)
@@ -1063,38 +1107,46 @@ static int lr20xx_hw_init(struct lr20xx_data *data,
 	 * From Semtech reference ral_lr20xx_init(). */
 	{
 		const uint32_t simo_freq = (uint32_t)(2.8e6 * 1.048576);
-		lr20xx_regmem_write_regmem32(ctx, 0x80004c, &simo_freq, 1);
+		lr20xx_status_t simo_rc = lr20xx_regmem_write_regmem32(ctx, 0x80004c, &simo_freq, 1);
+		LOG_INF("init: SIMO workaround(0x%08x)=%d", simo_freq, simo_rc);
 	}
 
 	if (cfg->tcxo_voltage_mv > 0) {
-		/* Convert ms to RTC steps (31.25 us per step) */
-		uint32_t rtc_steps = (cfg->tcxo_startup_delay_ms * 1000) / 31;
-		lr20xx_system_set_tcxo_mode(ctx,
+		/* Timeout in 32 MHz ticks (31.25 ns/tick): 1 ms = 32000 ticks */
+		uint32_t tcxo_ticks = cfg->tcxo_startup_delay_ms * 32000U;
+		lr20xx_status_t tcxo_rc = lr20xx_system_set_tcxo_mode(ctx,
 					    get_tcxo_voltage(cfg->tcxo_voltage_mv),
-					    rtc_steps);
-		LOG_DBG("TCXO: %dmV", cfg->tcxo_voltage_mv);
+					    tcxo_ticks);
+		LOG_INF("init: set_tcxo(%dmV, %u ticks = %ums)=%d",
+			cfg->tcxo_voltage_mv, tcxo_ticks,
+			cfg->tcxo_startup_delay_ms, tcxo_rc);
 	}
 
 	/* Configure LF clock source (reference init requires this) */
-	lr20xx_system_cfg_lfclk(ctx, LR20XX_SYSTEM_LFCLK_RC);
+	lr20xx_status_t st;
+	st = lr20xx_system_cfg_lfclk(ctx, LR20XX_SYSTEM_LFCLK_RC);
+	LOG_INF("init: cfg_lfclk(RC)=%d", st);
 
-	lr20xx_system_set_reg_mode(ctx, LR20XX_SYSTEM_REG_MODE_DCDC);
+	st = lr20xx_system_set_reg_mode(ctx, LR20XX_SYSTEM_REG_MODE_DCDC);
+	LOG_INF("init: set_reg_mode(DCDC)=%d", st);
 
 	lr20xx_configure_rfswitch(ctx, cfg);
 
 	/* DIO5 is the physical IRQ line to the MCU.  configure_rfswitch may
 	 * have set it to FUNC_RF_SWITCH if bit 0 of rfswitch_enable was set.
 	 * Always override to FUNC_IRQ so set_dio_irq_cfg routes events here. */
-	lr20xx_system_set_dio_function(ctx, LR20XX_SYSTEM_DIO_5,
+	st = lr20xx_system_set_dio_function(ctx, LR20XX_SYSTEM_DIO_5,
 				       LR20XX_SYSTEM_DIO_FUNC_IRQ,
 				       LR20XX_SYSTEM_DIO_DRIVE_NONE);
+	LOG_INF("init: set_dio5_func(IRQ)=%d", st);
 
 	LOG_INF("RF switch: en=0x%02x rx=0x%02x tx=0x%02x txhp=0x%02x",
 		cfg->rfswitch_enable, cfg->rfswitch_rx,
 		cfg->rfswitch_tx, cfg->rfswitch_tx_hp);
 
-	lr20xx_radio_common_set_rx_tx_fallback_mode(ctx,
+	st = lr20xx_radio_common_set_rx_tx_fallback_mode(ctx,
 						    LR20XX_RADIO_FALLBACK_STDBY_RC);
+	LOG_INF("init: set_fallback(STDBY_RC)=%d", st);
 
 	lr20xx_system_errors_t sys_errors = 0;
 	lr20xx_system_get_errors(ctx, &sys_errors);
@@ -1106,19 +1158,30 @@ static int lr20xx_hw_init(struct lr20xx_data *data,
 
 	/* Front-end calibration at 3 standard frequencies (Semtech reference).
 	 * Calibrates ADC offset, poly-phase filter, and image rejection.
-	 * RF operations should be within 50 MHz of a calibrated point.
-	 * 869.618 MHz entry is tuned for EU sub-GHz LoRa. */
+	 * RF operations should be within 50 MHz of a calibrated point. */
 	lr20xx_radio_common_front_end_calibration_value_t fe_cal[3] = {
 		{ .rx_path = LR20XX_RADIO_COMMON_RX_PATH_LF,
 		  .frequency_in_hertz = 470000000 },
 		{ .rx_path = LR20XX_RADIO_COMMON_RX_PATH_LF,
-		  .frequency_in_hertz = 869618000 },
+		  .frequency_in_hertz = 897500000 },
 		{ .rx_path = LR20XX_RADIO_COMMON_RX_PATH_HF,
 		  .frequency_in_hertz = 2441000000UL },
 	};
-	lr20xx_radio_common_calibrate_front_end_helper(ctx, fe_cal, 3);
+	st = lr20xx_radio_common_calibrate_front_end_helper(ctx, fe_cal, 3);
+	LOG_INF("init: front_end_cal(3 freq)=%d", st);
+
+	/* Check for errors after calibration */
+	lr20xx_system_errors_t cal_errs = 0;
+	lr20xx_system_get_errors(ctx, &cal_errs);
+	if (cal_errs) {
+		LOG_WRN("init: errors after FE cal: 0x%04x", cal_errs);
+		lr20xx_system_clear_errors(ctx);
+	}
 
 	lr20xx_hal_enable_dio1_irq(&data->hal_ctx);
+
+	int dio1_state = gpio_pin_get_dt(&data->hal_ctx.dio1);
+	LOG_INF("init: DIO1 pin state=%d after init", dio1_state);
 
 	data->rx_boost_enabled = cfg->rx_boosted;
 	data->rx_boost_applied = false;
