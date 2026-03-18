@@ -286,7 +286,7 @@ static int upload_handler(struct http_client_ctx *client,
 static struct net_mgmt_event_callback wifi_mgmt_cb;
 
 static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
-				     uint32_t mgmt_event,
+				     uint64_t mgmt_event,
 				     struct net_if *iface)
 {
 	switch (mgmt_event) {
@@ -303,7 +303,7 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb,
 		LOG_INF("WiFi client DISCONNECTED from AP");
 		break;
 	default:
-		LOG_DBG("WiFi mgmt event: 0x%08x", mgmt_event);
+		LOG_DBG("WiFi mgmt event: 0x%016llx", mgmt_event);
 		break;
 	}
 }

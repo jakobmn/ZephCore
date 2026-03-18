@@ -23,14 +23,25 @@ SWD flash: `west flash` (requires J-Link, pyocd, or nrfjprog connected).
 
 ### ESP32
 
-| Board               | Build string                                | Flash           |
-|----------------------|---------------------------------------------|-----------------|
-| XIAO ESP32-C3        | `west build -b xiao_esp32c3 zephcore`      | `west flash`    |
-| XIAO ESP32-C6        | `west build -b xiao_esp32c6 zephcore`      | `west flash`    |
-| LilyGo TLoRa C6      | `west build -b lilygo_tlora_c6 zephcore`  | `west flash`    |
-| Station G2           | `west build -b station_g2 zephcore`         | `west flash`    |
+| Board               | Build string                                              | Flash           |
+|----------------------|-----------------------------------------------------------|-----------------|
+| XIAO ESP32-C3        | `west build -b xiao_esp32c3 zephcore`                   | `west flash`    |
+| XIAO ESP32-C6        | `west build -b xiao_esp32c6 zephcore`                   | `west flash`    |
+| LilyGo TLoRa C6      | `west build -b lilygo_tlora_c6 zephcore`                | `west flash`    |
+| Station G2           | `west build -b station_g2/esp32s3/procpu zephcore`       | `west flash`    |
 
 ESP32 flash uses esptool over USB. Hold BOOT button if device doesn't enter download mode.
+
+**First-time setup required (all ESP32 boards):**
+
+```
+# Download Espressif BLE controller blobs (closed-source, required for BLE)
+west blobs fetch hal_espressif
+```
+
+Run this once after `west init`/`west update`. Without it, CMake will abort with
+a blob validation error during configure. Re-run after any `west update` that
+bumps the `hal_espressif` revision.
 
 ### nRF54L15
 
