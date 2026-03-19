@@ -581,7 +581,22 @@ static void action_deep_sleep(void)
 	gps_power_off_for_shutdown();
 	mesh_disable_power_regulators();
 
-	/* 5. Configure GPIO SENSE for button wakeup, then enter System OFF.
+	/* 5. Hold the LoRa radio in hardware reset.
+	 *
+	 * sys_poweroff() bypasses device PM — the SX126x hardware duty cycle
+	 * would otherwise keep cycling autonomously (drawing mA) while the
+	 * SoC is in System OFF (~1µA).  Drive RESET low; nRF52 GPIO output
+	 * latches persist across System OFF so the chip stays in reset (0µA).
+	 * On wakeup, the driver's sx126x_init() re-asserts then releases reset. */
+#if DT_NODE_EXISTS(DT_ALIAS(lora0)) && DT_NODE_HAS_PROP(DT_ALIAS(lora0), reset_gpios)
+	{
+		static const struct gpio_dt_spec lora_reset =
+			GPIO_DT_SPEC_GET(DT_ALIAS(lora0), reset_gpios);
+		gpio_pin_configure_dt(&lora_reset, GPIO_OUTPUT_ACTIVE);
+	}
+#endif
+
+	/* 6. Configure GPIO SENSE for button wakeup, then enter System OFF.
 	 *
 	 * The nRF GPIO driver does not implement GPIO_INT_WAKEUP, so the
 	 * wakeup-source DTS property has no effect on nRF52. We must set
