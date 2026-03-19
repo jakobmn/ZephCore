@@ -3,6 +3,11 @@
 
 zephyr_library()
 zephyr_library_compile_definitions(LR20XX_DISABLE_WARNINGS)
+# We run in LDO mode (not DCDC) — disable automatic DCDC workarounds
+# that the SDK injects after set_pkt_type, set_rx_path, set_modulation_params.
+# Per lr20xx_workarounds.h, these are only needed when REG_MODE_DCDC is used.
+zephyr_library_compile_definitions(LR20XX_WORKAROUNDS_DISABLE_AUTOMATIC_DCDC_RESET)
+zephyr_library_compile_definitions(LR20XX_WORKAROUNDS_DISABLE_AUTOMATIC_DCDC_CONFIGURE)
 
 zephyr_library_sources(lr20xx_lora.c)
 
