@@ -25,7 +25,7 @@
 #include "RepeaterDataStore.h"
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.14.0-zephyr"
+  #define FIRMWARE_VERSION   "v1.14.1-zephyr"
 #endif
 
 #ifndef FIRMWARE_BUILD_DATE

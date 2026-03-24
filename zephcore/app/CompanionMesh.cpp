@@ -73,6 +73,7 @@ LOG_MODULE_REGISTER(zephcore_companion, CONFIG_ZEPHCORE_MAIN_LOG_LEVEL);
 #define CMD_GET_AUTOADD_CONFIG   0x3B
 #define CMD_GET_ALLOWED_REPEAT_FREQ 0x3C
 #define CMD_SET_PATH_HASH_MODE      0x3D
+#define CMD_SEND_CHANNEL_DATA       0x3E
 
 /* Response packet types */
 #define PACKET_OK               0x00
@@ -102,6 +103,9 @@ LOG_MODULE_REGISTER(zephcore_companion, CONFIG_ZEPHCORE_MAIN_LOG_LEVEL);
 #define PACKET_STATS            0x18
 #define PACKET_AUTOADD_CONFIG   0x19
 #define PACKET_ALLOWED_REPEAT_FREQ 0x1A
+#define PACKET_CHANNEL_DATA_RECV   0x1B
+
+#define MAX_CHANNEL_DATA_LENGTH    (MAX_FRAME_SIZE - 9)
 
 #define MAX_SIGN_DATA_LEN       (8 * 1024)
 
@@ -355,8 +359,8 @@ size_t CompanionMesh::serializeContact(uint8_t *buf, const ContactInfo &c, uint8
 
 static bool isChannelMessage(const uint8_t *buf)
 {
-	// Channel messages have PACKET_CHANNEL_MSG_V3 (0x11) or PACKET_CHANNEL_MSG_RECV (0x08)
-	return buf[0] == PACKET_CHANNEL_MSG_V3 || buf[0] == PACKET_CHANNEL_MSG_RECV;
+	// Channel messages have PACKET_CHANNEL_MSG_V3 (0x11) or PACKET_CHANNEL_MSG_RECV (0x08) or PACKET_CHANNEL_DATA_RECV (0x1B)
+	return buf[0] == PACKET_CHANNEL_MSG_V3 || buf[0] == PACKET_CHANNEL_MSG_RECV || buf[0] == PACKET_CHANNEL_DATA_RECV;
 }
 
 void CompanionMesh::queueOfflineMessage(const uint8_t *data, size_t len)
@@ -741,6 +745,41 @@ void CompanionMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh
 	i += text_len;
 
 	LOG_INF("onChannelMessageRecv: frame_len=%d channel_idx=%d", i, channel_idx);
+	queueOfflineMessage(frame, i);
+	sendPush(PUSH_CODE_MSG_WAITING);
+}
+
+void CompanionMesh::onChannelDataRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt,
+	uint16_t data_type, const uint8_t *data, size_t data_len)
+{
+	if (data_len > MAX_CHANNEL_DATA_LENGTH) {
+		LOG_WRN("onChannelDataRecv: dropping payload_len=%d exceeds frame limit=%d",
+			(int)data_len, (int)MAX_CHANNEL_DATA_LENGTH);
+		return;
+	}
+
+	uint8_t frame[MAX_FRAME_SIZE];
+	int i = 0;
+	frame[i++] = PACKET_CHANNEL_DATA_RECV;
+	frame[i++] = pkt ? (int8_t)(pkt->getSNR() * 4) : 0;
+	frame[i++] = 0;  // reserved1
+	frame[i++] = 0;  // reserved2
+
+	uint8_t channel_idx = findChannelIdx(channel);
+	frame[i++] = channel_idx;
+	frame[i++] = (pkt && pkt->isRouteFlood()) ? pkt->path_len : 0xFF;
+	frame[i++] = (uint8_t)(data_type & 0xFF);
+	frame[i++] = (uint8_t)(data_type >> 8);
+	frame[i++] = (uint8_t)data_len;
+
+	int copy_len = (int)data_len;
+	if (copy_len > 0) {
+		memcpy(&frame[i], data, copy_len);
+		i += copy_len;
+	}
+
+	LOG_INF("onChannelDataRecv: frame_len=%d channel_idx=%d data_type=%d",
+		i, channel_idx, (int)data_type);
 	queueOfflineMessage(frame, i);
 	sendPush(PUSH_CODE_MSG_WAITING);
 }
@@ -1772,7 +1811,7 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 			// If repeat requested, validate frequency against allowed bands
 			if (repeat && !isValidClientRepeatFreq(freq)) {
 				sendPacketError(ERR_ILLEGAL_ARG);
-			} else if (freq >= 300000 && freq <= 2500000 &&
+			} else if (freq >= 150000 && freq <= 2500000 &&
 			    bw >= 7000 && bw <= 500000 &&
 			    sf >= 5 && sf <= 12 &&
 			    cr >= 5 && cr <= 8) {
@@ -1874,7 +1913,7 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 			#endif
 			static const uint8_t fw_build[12] = FIRMWARE_BUILD_DATE;
 			static const uint8_t model[40] = CONFIG_ZEPHCORE_BOARD_NAME;
-			static const uint8_t version[20] = "v1.14.0-zephyr";
+			static const uint8_t version[20] = "v1.14.1-zephyr";
 			uint8_t rsp[82];
 			rsp[0] = PACKET_DEVICE_INFO;
 			rsp[1] = 10;  // FIRMWARE_VER_CODE - v10 = path_hash_mode support
@@ -2605,6 +2644,47 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 			sendPacketError(ERR_ILLEGAL_ARG);
 		}
 		return true;
+
+	case CMD_SEND_CHANNEL_DATA: {
+		if (len < 4) {
+			sendPacketError(ERR_ILLEGAL_ARG);
+			return true;
+		}
+		int i = 1;
+		uint8_t channel_idx = data[i++];
+		uint8_t path_len = data[i++];
+
+		if (!mesh::Packet::isValidPathLen(path_len) && path_len != OUT_PATH_UNKNOWN) {
+			LOG_WRN("CMD_SEND_CHANNEL_DATA invalid path size: %d", path_len);
+			sendPacketError(ERR_ILLEGAL_ARG);
+			return true;
+		}
+
+		uint8_t path[MAX_PATH_SIZE];
+		if (path_len != OUT_PATH_UNKNOWN) {
+			i += mesh::Packet::writePath(path, &data[i], path_len);
+		}
+
+		uint16_t data_type = ((uint16_t)data[i]) | (((uint16_t)data[i + 1]) << 8);
+		i += 2;
+		const uint8_t *payload = &data[i];
+		int payload_len = (len > (size_t)i) ? (int)(len - i) : 0;
+
+		ChannelDetails channel;
+		if (!getChannel(channel_idx, channel)) {
+			sendPacketError(ERR_NOT_FOUND);
+		} else if (data_type == DATA_TYPE_RESERVED) {
+			sendPacketError(ERR_ILLEGAL_ARG);
+		} else if (payload_len > MAX_CHANNEL_DATA_LENGTH) {
+			LOG_WRN("CMD_SEND_CHANNEL_DATA payload too long: %d > %d", payload_len, MAX_CHANNEL_DATA_LENGTH);
+			sendPacketError(ERR_ILLEGAL_ARG);
+		} else if (sendGroupData(channel.channel, path, path_len, data_type, payload, payload_len)) {
+			sendPacketOk();
+		} else {
+			sendPacketError(ERR_TABLE_FULL);
+		}
+		return true;
+	}
 
 	case CMD_SEND_ANON_REQ:
 		if (len >= 1 + PUB_KEY_SIZE + 1) {

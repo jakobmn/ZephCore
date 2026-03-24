@@ -137,7 +137,7 @@ void CommonCLI::loadPrefs(const char* path) {
         _prefs->airtime_factor *= 10.0f;
     }
     _prefs->airtime_factor = constrain(_prefs->airtime_factor, 0.0f, 99.0f);
-    _prefs->freq = constrain(_prefs->freq, 400.0f, 2500.0f);
+    _prefs->freq = constrain(_prefs->freq, 150.0f, 2500.0f);
     _prefs->bw = constrain(_prefs->bw, 7.8f, 500.0f);
     _prefs->sf = constrain(_prefs->sf, (uint8_t)5, (uint8_t)12);
     _prefs->cr = constrain(_prefs->cr, (uint8_t)5, (uint8_t)8);
@@ -377,12 +377,12 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
         uint8_t sf = num > 2 ? atoi(parts[2]) : 0;
         uint8_t cr = num > 3 ? atoi(parts[3]) : 0;
         int temp_timeout_mins = num > 4 ? atoi(parts[4]) : 0;
-        if (freq >= 300.0f && freq <= 2500.0f && sf >= 5 && sf <= 12 &&
+        if (freq >= 150.0f && freq <= 2500.0f && sf >= 5 && sf <= 12 &&
             cr >= 5 && cr <= 8 && bw >= 7.0f && bw <= 500.0f && temp_timeout_mins > 0) {
             _callbacks->applyTempRadioParams(freq, bw, sf, cr, temp_timeout_mins);
             snprintf(reply, CLI_REPLY_SIZE, "OK - temp params for %d mins", temp_timeout_mins);
         } else {
-            strcpy(reply, "Error: freq 300-2500, bw 7-500, sf 5-12, cr 5-8, timeout>0");
+            strcpy(reply, "Error: freq 150-2500, bw 7-500, sf 5-12, cr 5-8, timeout>0");
         }
     } else if (memcmp(command, "password ", 9) == 0) {
         StrHelper::strncpy(_prefs->password, &command[9], sizeof(_prefs->password));
@@ -499,7 +499,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
             } else {
                 snprintf(reply, CLI_REPLY_SIZE, "> %.3f", (double)adc_mult);
             }
-        } else if (memcmp(config, "rxboost", 7) == 0) {
+        } else if (memcmp(config, "radio.rxgain", 12) == 0) {
             snprintf(reply, CLI_REPLY_SIZE, "> %d", (int)_prefs->rx_boost);
         } else if (memcmp(config, "rxduty", 6) == 0) {
             snprintf(reply, CLI_REPLY_SIZE, "> %d", (int)_prefs->rx_duty_cycle);
@@ -617,7 +617,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
             float bw = num > 1 ? strtof(parts[1], nullptr) : 0.0f;
             uint8_t sf = num > 2 ? atoi(parts[2]) : 0;
             uint8_t cr = num > 3 ? atoi(parts[3]) : 0;
-            if (freq >= 300.0f && freq <= 2500.0f && sf >= 5 && sf <= 12 &&
+            if (freq >= 150.0f && freq <= 2500.0f && sf >= 5 && sf <= 12 &&
                 cr >= 5 && cr <= 8 && bw >= 7.0f && bw <= 500.0f) {
                 _prefs->sf = sf;
                 _prefs->cr = cr;
@@ -626,7 +626,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
                 _callbacks->savePrefs();
                 strcpy(reply, "OK - reboot to apply");
             } else {
-                strcpy(reply, "Error: freq 300-2500, bw 7-500, sf 5-12, cr 5-8");
+                strcpy(reply, "Error: freq 150-2500, bw 7-500, sf 5-12, cr 5-8");
             }
         } else if (memcmp(config, "lat ", 4) == 0) {
             _prefs->node_lat = atof(&config[4]);
@@ -744,12 +744,12 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
             }
         } else if (sender_timestamp == 0 && memcmp(config, "freq ", 5) == 0) {
             float f = atof(&config[5]);
-            if (f >= 400.0f && f <= 2500.0f) {
+            if (f >= 150.0f && f <= 2500.0f) {
                 _prefs->freq = f;
                 savePrefs();
                 strcpy(reply, "OK - reboot to apply");
             } else {
-                strcpy(reply, "Error: range 400-2500 MHz");
+                strcpy(reply, "Error: range 150-2500 MHz");
             }
         } else if (memcmp(config, "adc.multiplier ", 15) == 0) {
             _prefs->adc_multiplier = atof(&config[15]);
@@ -764,12 +764,12 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
                 _prefs->adc_multiplier = 0.0f;
                 strcpy(reply, "Error: unsupported by this board");
             }
-        } else if (memcmp(config, "rxboost ", 8) == 0) {
-            int val = atoi(&config[8]);
+        } else if (memcmp(config, "radio.rxgain ", 13) == 0) {
+            int val = atoi(&config[13]);
             if (val == 0 || val == 1) {
                 _prefs->rx_boost = (uint8_t)val;
                 savePrefs();
-                snprintf(reply, CLI_REPLY_SIZE, "OK - rxboost=%d (reboot to apply)", _prefs->rx_boost);
+                snprintf(reply, CLI_REPLY_SIZE, "OK - radio.rxgain=%d (reboot to apply)", _prefs->rx_boost);
             } else {
                 strcpy(reply, "Error: must be 0 or 1");
             }
