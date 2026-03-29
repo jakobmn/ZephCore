@@ -84,6 +84,7 @@ zephcore/AUDIT_FINDINGS.md
 # Upstream tracking (local only)
 UPSTREAM_TRACKER.md
 WEST_UPDATE.md
+/westchanges/
 
 # Side projects (not part of main firmware)
 /doom/

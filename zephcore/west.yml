@@ -10,7 +10,7 @@ manifest:
       path: modules/hal/espressif
     - name: zephyr
       remote: zephyrproject-rtos
-      revision: b104f826ca8e3a85cb205d2962189287f59d3174
+      revision: ccfd5efa09f9fed814c1947edba2739544b3c901
       import: true
 
   self:
