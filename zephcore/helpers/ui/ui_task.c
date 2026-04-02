@@ -91,17 +91,26 @@ LOG_MODULE_REGISTER(ui_task, CONFIG_ZEPHCORE_BOARD_LOG_LEVEL);
  * Works alongside displays; boards that want to disable it can
  * remove the led0 alias or override this with a Kconfig guard. */
 #if DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios)
-#define LED_NODE DT_ALIAS(led0)
 static const struct gpio_dt_spec heartbeat_led =
-	GPIO_DT_SPEC_GET(LED_NODE, gpios);
+	GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 #define HAS_HEARTBEAT_LED 1
 #elif DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
-#define LED_NODE DT_ALIAS(led1)
 static const struct gpio_dt_spec heartbeat_led =
-	GPIO_DT_SPEC_GET(LED_NODE, gpios);
+	GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
 #define HAS_HEARTBEAT_LED 1
 #else
 #define HAS_HEARTBEAT_LED 0
+#endif
+
+/* Message indicator LED — solid ON while offline queue is non-empty.
+ * Uses led1 only when led0 is already taken by the heartbeat. */
+#if HAS_HEARTBEAT_LED && DT_NODE_HAS_PROP(DT_ALIAS(led0), gpios) && \
+    DT_NODE_HAS_PROP(DT_ALIAS(led1), gpios)
+static const struct gpio_dt_spec msg_led =
+	GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
+#define HAS_MSG_LED 1
+#else
+#define HAS_MSG_LED 0
 #endif
 
 #define LED_CYCLE_MS      4000   /* Total heartbeat period */
@@ -183,6 +192,9 @@ static void led_off_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
 	gpio_pin_set_dt(&heartbeat_led, 0);
+#if HAS_MSG_LED
+	gpio_pin_set_dt(&msg_led, 0);
+#endif
 
 	/* Schedule next ON after remainder of cycle */
 	struct ui_state *s = get_state();
@@ -195,10 +207,16 @@ static void led_on_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
 	gpio_pin_set_dt(&heartbeat_led, 1);
-
-	/* Schedule OFF after pulse width */
+#if HAS_MSG_LED
+	struct ui_state *s = get_state();
+	if (s->msg_count > 0) {
+		gpio_pin_set_dt(&msg_led, 1);
+	}
+	uint16_t on_ms = (s->msg_count > 0) ? LED_ON_MSG_MS : LED_ON_MS;
+#else
 	struct ui_state *s = get_state();
 	uint16_t on_ms = (s->msg_count > 0) ? LED_ON_MSG_MS : LED_ON_MS;
+#endif
 
 	k_work_reschedule(&led_off_work, K_MSEC(on_ms));
 }
@@ -550,11 +568,14 @@ static void action_deep_sleep(void)
 #ifdef CONFIG_POWEROFF
 	LOG_INF("deep sleep: shutting down...");
 
-	/* 1. Stop LED heartbeat */
+	/* 1. Stop LED heartbeat and msg indicator */
 #if HAS_HEARTBEAT_LED
 	k_work_cancel_delayable(&led_on_work);
 	k_work_cancel_delayable(&led_off_work);
 	gpio_pin_set_dt(&heartbeat_led, 0);
+#endif
+#if HAS_MSG_LED
+	gpio_pin_set_dt(&msg_led, 0);
 #endif
 
 	/* 2. Play shutdown melody (blocking wait) */
@@ -860,6 +881,12 @@ int ui_init(void)
 		LOG_INF("LED heartbeat started");
 	}
 #endif
+#if HAS_MSG_LED
+	if (gpio_is_ready_dt(&msg_led)) {
+		gpio_pin_configure_dt(&msg_led, GPIO_OUTPUT_INACTIVE);
+		LOG_INF("msg LED ready");
+	}
+#endif
 
 	/* NOTE: startup chime is NOT played here. It's played from main()
 	 * after loadPrefs() so we can respect the persisted buzzer_quiet setting.
@@ -938,12 +965,24 @@ void ui_notify(enum ui_event event)
 		break;
 	}
 
-	/* Wake display on notifications.
-	 * Repeater: never wake display on events — only user button wakes it.
-	 * Companion: wake unless phone is connected (phone handles its own). */
+	/* On message events: flash heartbeat LED immediately (if not BLE connected
+	 * and LEDs are enabled). Cancel the current cycle, turn on now, let
+	 * led_off_work resume the normal heartbeat after LED_ON_MSG_MS. */
+#if HAS_HEARTBEAT_LED
+	if (is_msg_event && !get_state()->ble_connected && !get_state()->leds_disabled
+	    && gpio_is_ready_dt(&heartbeat_led)) {
+		k_work_cancel_delayable(&led_on_work);
+		k_work_cancel_delayable(&led_off_work);
+		gpio_pin_set_dt(&heartbeat_led, 1);
+		k_work_reschedule(&led_off_work, K_MSEC(LED_ON_MSG_MS));
+	}
+#endif
+
+	/* Wake display on non-message notifications (BLE connect/disconnect etc).
+	 * Message notifications use buzzer + LED flash instead of waking the display. */
 #ifdef CONFIG_ZEPHCORE_UI_DISPLAY
 #ifndef ZEPHCORE_REPEATER
-	if (!(is_msg_event && get_state()->ble_connected)) {
+	if (!is_msg_event) {
 		mc_display_on();
 		schedule_render();
 	}

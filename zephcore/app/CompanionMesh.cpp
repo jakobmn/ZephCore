@@ -16,6 +16,10 @@
 #include <ZephyrSensorManager.h>
 #include <adapters/sensors/SimpleLPP.h>
 #include <adapters/ble/ZephyrBLE.h>
+#if IS_ENABLED(CONFIG_ZEPHCORE_UI_BUTTONS) || IS_ENABLED(CONFIG_ZEPHCORE_UI_BUZZER) || IS_ENABLED(CONFIG_ZEPHCORE_UI_DISPLAY)
+#include <ui_task.h>
+#define ZEPHCORE_HAS_UI_TASK 1
+#endif
 LOG_MODULE_REGISTER(zephcore_companion, CONFIG_ZEPHCORE_MAIN_LOG_LEVEL);
 
 /* Protocol commands (matches Arduino companion_radio) - sorted by opcode */
@@ -589,7 +593,6 @@ ContactInfo *CompanionMesh::processAck(const uint8_t *data)
 			uint32_t trip_time = now - sent_time;
 			put_le32(&ack_push[4], trip_time);
 			sendPush(PUSH_CODE_SEND_CONFIRMED, ack_push, 8);
-
 			return lookupContactByPubKey(ci.id.pub_key, PUB_KEY_SIZE);
 		}
 	}
@@ -611,6 +614,10 @@ void CompanionMesh::onMessageRecv(const ContactInfo &contact, mesh::Packet *pkt,
 	markConnectionActive(contact);
 	queueContactMessage(contact, pkt, TXT_TYPE_PLAIN, sender_timestamp, nullptr, 0, text);
 	sendPush(PUSH_CODE_MSG_WAITING);
+#if ZEPHCORE_HAS_UI_TASK
+	ui_set_msg_count((uint16_t)_offline_queue_count);
+	ui_notify(UI_EVENT_CONTACT_MSG);
+#endif
 }
 
 void CompanionMesh::queueContactMessage(const ContactInfo &contact, mesh::Packet *pkt,
@@ -685,6 +692,10 @@ void CompanionMesh::onSignedMessageRecv(const ContactInfo &contact, mesh::Packet
 	// sender_prefix is 4 bytes
 	queueContactMessage(contact, pkt, TXT_TYPE_SIGNED_PLAIN, sender_timestamp, sender_prefix, 4, text);
 	sendPush(PUSH_CODE_MSG_WAITING);
+#if ZEPHCORE_HAS_UI_TASK
+	ui_set_msg_count((uint16_t)_offline_queue_count);
+	ui_notify(UI_EVENT_CONTACT_MSG);
+#endif
 }
 
 uint32_t CompanionMesh::calcFloodTimeoutMillisFor(uint32_t pkt_airtime_millis) const
@@ -747,6 +758,10 @@ void CompanionMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh
 	LOG_DBG("onChannelMessageRecv: frame_len=%d channel_idx=%d", i, channel_idx);
 	queueOfflineMessage(frame, i);
 	sendPush(PUSH_CODE_MSG_WAITING);
+#if ZEPHCORE_HAS_UI_TASK
+	ui_set_msg_count((uint16_t)_offline_queue_count);
+	ui_notify(UI_EVENT_CHANNEL_MSG);
+#endif
 }
 
 void CompanionMesh::onChannelDataRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt,
@@ -1766,6 +1781,9 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 		if (_sync_pending) {
 			confirmOfflineMessage();
 			_sync_pending = false;
+#if ZEPHCORE_HAS_UI_TASK
+			ui_set_msg_count((uint16_t)_offline_queue_count);
+#endif
 		}
 
 		uint8_t buf[MAX_FRAME_SIZE];
