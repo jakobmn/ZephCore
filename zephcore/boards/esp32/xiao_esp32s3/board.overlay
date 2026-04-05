@@ -1,0 +1,88 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Seeed XIAO ESP32-S3 + WIO-SX1262 LoRa
+ *
+ * Pin mapping (from Arduino MeshCore variants/xiao_s3_wio):
+ * - GPIO41 (gpio1 pin 9)  = NSS     - GPIO7  (gpio0 pin 7)  = SPI SCK
+ * - GPIO39 (gpio1 pin 7)  = DIO1    - GPIO8  (gpio0 pin 8)  = SPI MISO
+ * - GPIO40 (gpio1 pin 8)  = BUSY    - GPIO9  (gpio0 pin 9)  = SPI MOSI
+ * - GPIO42 (gpio1 pin 10) = RESET
+ * - GPIO38 (gpio1 pin 6)  = RXEN
+ * - GPIO21 (gpio0 pin 21) = User button
+ * - GPIO48 (gpio1 pin 16) = Status LED
+ *
+ * SPI2 SCK/MISO/MOSI pinctrl already set in Zephyr board DTS.
+ * Console: USB Serial/JTAG (usb_serial) — already set in board DTS.
+ */
+
+#include <zephyr/dt-bindings/lora/sx126x.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	aliases {
+		lora0 = &lora;
+		sw0 = &user_button;
+	};
+
+	buttons: buttons {
+		compatible = "gpio-keys";
+		user_button: user_button {
+			gpios = <&gpio0 21 GPIO_ACTIVE_LOW>;
+			label = "User Button";
+			zephyr,code = <INPUT_BTN_0>;
+		};
+	};
+};
+
+/* SX1262 on SPI2 (SCK=GPIO7, MISO=GPIO8, MOSI=GPIO9 — in board pinctrl) */
+&spi2 {
+	cs-gpios = <&gpio1 9 GPIO_ACTIVE_LOW>;  /* GPIO41 NSS */
+
+	lora: lora@0 {
+		compatible = "semtech,sx1262";
+		reg = <0>;
+		spi-max-frequency = <8000000>;
+
+		/* LoRa control pins */
+		reset-gpios = <&gpio1 10 GPIO_ACTIVE_LOW>;                    /* GPIO42 */
+		busy-gpios  = <&gpio1 8 GPIO_ACTIVE_HIGH>;                    /* GPIO40 */
+		dio1-gpios  = <&gpio1 7 (GPIO_PULL_DOWN | GPIO_ACTIVE_HIGH)>; /* GPIO39 */
+
+		/* RF switch: RXEN for RX, DIO2 drives TX enable */
+		rx-enable-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;  /* GPIO38 RXEN */
+		dio2-tx-enable;
+
+		/* TCXO 1.8V via DIO3 */
+		dio3-tcxo-voltage = <SX126X_DIO3_TCXO_1V8>;
+		tcxo-power-startup-delay-ms = <10>;
+
+		/* RX boosted mode for better sensitivity */
+		rx-boosted;
+	};
+};
+
+/*
+ * Flash partitions — repartition default ESP32-S3 4 MB layout.
+ * Delete lpcore, storage, scratch, and coredump partitions to reclaim
+ * the 384 KB from 0x3A0000 onwards for LittleFS.
+ *
+ * 0x3A0000 - 0x3FFFFF (384KB) LittleFS (identity, contacts, channels, BLE bonds)
+ */
+/delete-node/ &slot0_lpcore_partition;
+/delete-node/ &slot1_lpcore_partition;
+/delete-node/ &storage_partition;
+/delete-node/ &scratch_partition;
+/delete-node/ &coredump_partition;
+
+&flash0 {
+	partitions {
+		/* LittleFS 384KB for DataStore + file-based BLE settings */
+		lfs_partition: partition@3a0000 {
+			label = "lfs";
+			reg = <0x3A0000 0x60000>;
+		};
+	};
+};
+
+/* LittleFS auto-mount — standard /lfs mount point */
+#include "../../common/filesystem.dtsi"

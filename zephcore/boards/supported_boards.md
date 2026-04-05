@@ -22,6 +22,7 @@ promicro_lr2021
 ```
 xiao_esp32c3
 xiao_esp32c6
+xiao_esp32s3/esp32s3/procpu
 lilygo_tlora_c6/esp32c6/hpcore
 station_g2/esp32s3/procpu
 ```
