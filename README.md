@@ -50,7 +50,7 @@ Other benefits:
 
 ## Building
 
-Prerequisites: [Zephyr SDK](https://docs.zephyrproject.org/latest/develop/getting_started/index.html) and `west` installed.
+Prerequisites: [Zephyr SDK >=1.0.1 (!)](https://docs.zephyrproject.org/latest/develop/getting_started/index.html) and `west` installed.
 
 Optional: [adafruit-nrfutil](https://github.com/adafruit/Adafruit_nRF52_nrfutil) to allow DFU zip generation for OTA updates on nRF52 
 
