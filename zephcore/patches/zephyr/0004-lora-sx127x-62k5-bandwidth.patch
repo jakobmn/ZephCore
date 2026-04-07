@@ -1,0 +1,32 @@
+diff --git a/drivers/lora/loramac-node/sx12xx_common.c b/drivers/lora/loramac-node/sx12xx_common.c
+index 17689720dd2..09982dc2e70 100644
+--- a/drivers/lora/loramac-node/sx12xx_common.c
++++ b/drivers/lora/loramac-node/sx12xx_common.c
+@@ -195,8 +195,15 @@ static void sx12xx_ev_rx_error(void)
+ /**
+  * @brief Convert Zephyr bandwidth enum to loramac-node bandwidth index
+  *
+- * The loramac-node library expects bandwidth as an index (0, 1, 2) into its
+- * internal Bandwidths[] array, not the actual kHz value.
++ * The loramac-node library expects bandwidth as an index into its internal
++ * Bandwidths[] array (not the actual kHz value).  The SX127x hardware
++ * supports sub-125 kHz LoRa bandwidths; index 3 maps to 62.5 kHz (reg BW=6).
++ *
++ * Index mapping (kept in sync with sx1276.c / sx1272.c):
++ *   0 → 125 kHz (reg BW 7)
++ *   1 → 250 kHz (reg BW 8)
++ *   2 → 500 kHz (reg BW 9)
++ *   3 → 62.5 kHz (reg BW 6) — SX127x only
+  *
+  * @param bandwidth Zephyr lora_signal_bandwidth enum value
+  * @param bw_idx Pointer to store the resulting bandwidth index
+@@ -215,6 +222,9 @@ static int sx12xx_get_bandwidth_idx(enum lora_signal_bandwidth bandwidth,
+ 	case BW_500_KHZ:
+ 		*bw_idx = 2;
+ 		break;
++	case BW_62_KHZ:
++		*bw_idx = 3;
++		break;
+ 	default:
+ 		return -EINVAL;
+ 	}

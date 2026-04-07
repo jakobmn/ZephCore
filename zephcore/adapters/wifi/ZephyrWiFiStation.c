@@ -98,6 +98,19 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 		if (success) {
 			LOG_INF("WiFi link up (SSID: %s)", s_creds ? s_creds->wifi_ssid : "?");
 			s_wifi_link_up = true;
+			/* Disable power save — WIFI_PS_MIN_MODEM (default) sleeps between
+			 * DTIM beacons, which delays ACKs and causes the MQTT broker's TCP
+			 * stack to retransmit and eventually RST the connection (-ECONNRESET
+			 * in the poll loop). WIFI_PS_DISABLED keeps the radio always awake. */
+			struct wifi_ps_params ps = {
+				.enabled = WIFI_PS_DISABLED,
+				.type    = WIFI_PS_PARAM_STATE,
+			};
+			if (net_mgmt(NET_REQUEST_WIFI_PS, iface, &ps, sizeof(ps)) < 0) {
+				LOG_WRN("Failed to disable WiFi power save");
+			} else {
+				LOG_INF("WiFi power save disabled");
+			}
 			/* DHCP will fire ipv4_event_handler when lease is obtained */
 		} else {
 			LOG_WRN("WiFi connect failed (reason=%d) — retry in 10s", reason);
