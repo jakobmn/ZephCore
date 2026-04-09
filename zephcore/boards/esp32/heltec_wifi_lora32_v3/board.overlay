@@ -19,9 +19,9 @@
 
 / {
 	chosen {
-		/* Override upstream UART0 console → USB serial for ZephCore */
-		zephyr,console = &usb_serial;
-		zephyr,shell-uart = &usb_serial;
+		/* Keep console/shell on UART0 for stable host logging on V3 */
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
 	};
 
 	/* Add label to upstream buttons node (defined without one) */
