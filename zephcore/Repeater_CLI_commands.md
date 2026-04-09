@@ -134,6 +134,33 @@ Regions control which flood packets the repeater forwards. The region tree is hi
 
 ---
 
+## Repeater Uplink (ESP32 + `CONFIG_ZEPHCORE_REPEATER_UPLINK`)
+
+These commands configure observer-style WiFi+MQTT packet reporting from repeater role.
+All `set uplink.*` changes are saved immediately and only applied after reboot.
+
+| Command | Description |
+|---------|-------------|
+| `get uplink.status` | Uplink runtime state: enabled flag, WiFi state, MQTT state, reboot-required flag |
+| `get uplink.enable` | Uplink enable flag (`on`/`off`) |
+| `get uplink.wifi.ssid` | Configured WiFi SSID |
+| `get uplink.mqtt.host` | Configured MQTT broker host |
+| `get uplink.mqtt.port` | Configured MQTT broker port |
+| `get uplink.mqtt.tls` | MQTT TLS mode (`0`/`1`) |
+| `get uplink.mqtt.user` | Configured MQTT username |
+| `get uplink.mqtt.iata` | Configured IATA/site code used in MQTT topic |
+| `set uplink.enable <on\|off>` | Enable or disable repeater uplink *(reboot required)* |
+| `set uplink.wifi.ssid <ssid>` | Set WiFi SSID *(reboot required)* |
+| `set uplink.wifi.psk <psk>` | Set WiFi password *(reboot required)* |
+| `set uplink.mqtt.host <host>` | Set MQTT host *(reboot required)* |
+| `set uplink.mqtt.port <port>` | Set MQTT port 1–65535 *(reboot required)* |
+| `set uplink.mqtt.tls <0\|1>` | Set MQTT TLS mode *(reboot required)* |
+| `set uplink.mqtt.user <user>` | Set MQTT username *(reboot required)* |
+| `set uplink.mqtt.password <pass>` | Set MQTT password *(reboot required)* |
+| `set uplink.mqtt.iata <code>` | Set MQTT site code *(reboot required)* |
+
+---
+
 ## `get` — Read Configuration
 
 | Command | Returns |

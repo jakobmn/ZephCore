@@ -84,6 +84,15 @@ endchoice
 
 if ZEPHCORE_ROLE_REPEATER
 
+config ZEPHCORE_REPEATER_UPLINK
+	bool "Enable repeater WiFi+MQTT uplink"
+	depends on SOC_FAMILY_ESPRESSIF_ESP32
+	default n
+	help
+	  Adds observer-style WiFi station and MQTT packet publishing to
+	  repeater builds. Configuration is stored in LittleFS and applied
+	  on reboot.
+
 config ZEPHCORE_MAX_CLIENTS
 	int "Maximum ACL clients"
 	default 32

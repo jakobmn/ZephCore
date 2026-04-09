@@ -42,18 +42,57 @@ function(zephcore_apply_patches PATCH_DIR TARGET_DIR LABEL)
     endif()
     foreach(PATCH_FILE ${PATCH_FILES})
         get_filename_component(PATCH_NAME ${PATCH_FILE} NAME)
+        set(PATCH_FILE_TO_APPLY "${PATCH_FILE}")
+        # Prepare LF/CRLF patch variants for robust matching across clones.
+        file(READ "${PATCH_FILE}" _patch_content)
+        string(REPLACE "\r\n" "\n" _patch_lf "${_patch_content}")
+        set(_patch_crlf "${_patch_lf}")
+        string(REPLACE "\n" "\r\n" _patch_crlf "${_patch_crlf}")
+        set(_tmp_patch_dir "${CMAKE_BINARY_DIR}/zephcore_patch_tmp/${LABEL}")
+        file(MAKE_DIRECTORY "${_tmp_patch_dir}")
+        set(_tmp_patch_lf "${_tmp_patch_dir}/${PATCH_NAME}.lf")
+        set(_tmp_patch_crlf "${_tmp_patch_dir}/${PATCH_NAME}.crlf")
+        file(WRITE "${_tmp_patch_lf}" "${_patch_lf}")
+        file(WRITE "${_tmp_patch_crlf}" "${_patch_crlf}")
         # Dry-run check
         execute_process(
-            COMMAND git apply --check "${PATCH_FILE}"
+            COMMAND git apply --check "${PATCH_FILE_TO_APPLY}"
             WORKING_DIRECTORY "${TARGET_DIR}"
             RESULT_VARIABLE PATCH_CHECK
             ERROR_VARIABLE PATCH_ERR
         )
+        # Retry check with explicit LF/CRLF variants to avoid EOL drift issues.
+        if(NOT PATCH_CHECK EQUAL 0)
+            execute_process(
+                COMMAND git apply --check "${_tmp_patch_lf}"
+                WORKING_DIRECTORY "${TARGET_DIR}"
+                RESULT_VARIABLE PATCH_CHECK_LF
+                ERROR_VARIABLE PATCH_ERR_LF
+            )
+            if(PATCH_CHECK_LF EQUAL 0)
+                set(PATCH_FILE_TO_APPLY "${_tmp_patch_lf}")
+                set(PATCH_CHECK 0)
+            else()
+                execute_process(
+                    COMMAND git apply --check "${_tmp_patch_crlf}"
+                    WORKING_DIRECTORY "${TARGET_DIR}"
+                    RESULT_VARIABLE PATCH_CHECK_CRLF
+                    ERROR_VARIABLE PATCH_ERR_CRLF
+                )
+                if(PATCH_CHECK_CRLF EQUAL 0)
+                    set(PATCH_FILE_TO_APPLY "${_tmp_patch_crlf}")
+                    set(PATCH_CHECK 0)
+                else()
+                    # Keep the most relevant error from the last attempted variant.
+                    set(PATCH_ERR "${PATCH_ERR_CRLF}")
+                endif()
+            endif()
+        endif()
         # Stale patches from previous build: reset affected files, retry
         if(NOT PATCH_CHECK EQUAL 0)
             # Extract affected file paths from numstat
             execute_process(
-                COMMAND git apply --numstat "${PATCH_FILE}"
+                COMMAND git apply --numstat "${PATCH_FILE_TO_APPLY}"
                 WORKING_DIRECTORY "${TARGET_DIR}"
                 OUTPUT_VARIABLE PATCH_NUMSTAT
                 ERROR_QUIET
@@ -74,7 +113,7 @@ function(zephcore_apply_patches PATCH_DIR TARGET_DIR LABEL)
                 )
                 # Retry dry-run
                 execute_process(
-                    COMMAND git apply --check "${PATCH_FILE}"
+                    COMMAND git apply --check "${PATCH_FILE_TO_APPLY}"
                     WORKING_DIRECTORY "${TARGET_DIR}"
                     RESULT_VARIABLE PATCH_CHECK
                     ERROR_VARIABLE PATCH_ERR
@@ -94,7 +133,7 @@ function(zephcore_apply_patches PATCH_DIR TARGET_DIR LABEL)
         endif()
         # Apply
         execute_process(
-            COMMAND git apply "${PATCH_FILE}"
+            COMMAND git apply "${PATCH_FILE_TO_APPLY}"
             WORKING_DIRECTORY "${TARGET_DIR}"
             RESULT_VARIABLE APPLY_RESULT
             ERROR_VARIABLE APPLY_ERR
@@ -425,12 +464,27 @@ if(CONFIG_ZEPHCORE_ROLE_REPEATER)
   target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/adapters/usb
   )
+  if(CONFIG_ZEPHCORE_REPEATER_UPLINK AND CONFIG_MQTT_LIB)
+    target_sources(app PRIVATE
+      app/observer_creds.cpp
+      adapters/wifi/ZephyrWiFiStation.c
+      adapters/mqtt/ZephyrMQTTPublisher.c
+    )
+    target_include_directories(app PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/adapters/wifi
+      ${CMAKE_CURRENT_SOURCE_DIR}/adapters/mqtt
+      ${CMAKE_CURRENT_SOURCE_DIR}/app
+    )
+  elseif(CONFIG_ZEPHCORE_REPEATER_UPLINK)
+    message(WARNING "ZephCore repeater uplink requested, but MQTT is disabled (likely prod.conf). Build will exclude uplink runtime.")
+  endif()
   target_compile_definitions(app PRIVATE ZEPHCORE_REPEATER=1)
 elseif(CONFIG_ZEPHCORE_ROLE_OBSERVER)
   message(STATUS "ZephCore Role: OBSERVER")
   target_sources(app PRIVATE
     app/main_observer.cpp
     app/ObserverMesh.cpp
+    app/observer_creds.cpp
     app/RepeaterDataStore.cpp
     adapters/wifi/ZephyrWiFiStation.c
     adapters/mqtt/ZephyrMQTTPublisher.c

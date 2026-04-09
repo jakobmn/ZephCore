@@ -325,7 +325,7 @@ static void run_poll_loop(void)
 
 /* ========== Publisher thread ========== */
 
-#define MQTT_THREAD_STACK_SIZE 8192
+#define MQTT_THREAD_STACK_SIZE 12288
 #define MQTT_THREAD_PRIORITY   5
 
 static void mqtt_thread_fn(void *p1, void *p2, void *p3);

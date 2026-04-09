@@ -1,0 +1,2 @@
+patches/zephyr/*.patch text eol=lf
+patches/modules/loramac-node/*.patch text eol=crlf

@@ -20,6 +20,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+#include "observer_creds.h"
+#include <ZephyrWiFiStation.h>
+#include <ZephyrMQTTPublisher.h>
+#endif
 
 /* Helper to get radio driver for stats — uses LoRaRadioBase (works for SX126x and LR1110) */
 static inline mesh::LoRaRadioBase& getRadioDriver(mesh::Radio* radio) {
@@ -41,6 +46,16 @@ static void simple_sort(T* arr, int count, Comparator cmp) {
 }
 
 LOG_MODULE_REGISTER(zephcore_repeater, CONFIG_ZEPHCORE_MAIN_LOG_LEVEL);
+
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+static RepeaterMesh *s_uplink_mesh;
+static void uplink_time_sync_cb(uint32_t unix_ts)
+{
+	if (s_uplink_mesh) {
+		s_uplink_mesh->getRTCClock()->setCurrentTime(unix_ts);
+	}
+}
+#endif
 
 /* Protocol constants */
 #define FIRMWARE_VER_LEVEL       2
@@ -468,6 +483,13 @@ void RepeaterMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len)
 #endif
     (void)snr;
     (void)rssi;
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+    _uplink_last_rssi = rssi;
+    _uplink_last_raw_len = len <= (int)sizeof(_uplink_last_raw) ? len : (int)sizeof(_uplink_last_raw);
+    if (_uplink_last_raw_len > 0) {
+        memcpy(_uplink_last_raw, raw, _uplink_last_raw_len);
+    }
+#endif
 }
 
 void RepeaterMesh::logRx(mesh::Packet* pkt, int len, float score) {
@@ -476,6 +498,10 @@ void RepeaterMesh::logRx(mesh::Packet* pkt, int len, float score) {
                 len, pkt->getPayloadType(), pkt->isRouteDirect() ? "D" : "F",
                 pkt->payload_len, (int)_radio->getLastSNR(), (int)_radio->getLastRSSI());
     }
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+    _uplink_last_score = score;
+    publishUplinkPacket(pkt);
+#endif
 }
 
 void RepeaterMesh::logTx(mesh::Packet* pkt, int len) {
@@ -805,6 +831,17 @@ RepeaterMesh::RepeaterMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::Mil
     initNodePrefs(&_prefs);
     strcpy(_prefs.node_name, "Repeater");
     _prefs.advert_loc_policy = ADVERT_LOC_PREFS;  // Repeaters always advertise prefs coordinates
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+    memset(&_uplink_creds, 0, sizeof(_uplink_creds));
+    observer_creds_init(&_uplink_creds);
+    _uplink_reboot_required = false;
+    memset(_uplink_pubkey_hex, 0, sizeof(_uplink_pubkey_hex));
+    memset(_uplink_packets_topic, 0, sizeof(_uplink_packets_topic));
+    memset(_uplink_status_topic, 0, sizeof(_uplink_status_topic));
+    _uplink_last_score = 0.0f;
+    _uplink_last_rssi = 0.0f;
+    _uplink_last_raw_len = 0;
+#endif
 }
 
 void RepeaterMesh::begin(RepeaterDataStore* store) {
@@ -837,6 +874,27 @@ void RepeaterMesh::begin(RepeaterDataStore* store) {
 
     LOG_INF("RepeaterMesh started: %s (freq=%.2f bw=%.0f sf=%d cr=%d)",
             _prefs.node_name, (double)_prefs.freq, (double)_prefs.bw, _prefs.sf, _prefs.cr);
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+    observer_creds_load(&_uplink_creds, _store->getBasePath());
+    mesh::Utils::toHex(_uplink_pubkey_hex, self_id.pub_key, PUB_KEY_SIZE);
+    _uplink_pubkey_hex[PUB_KEY_SIZE * 2] = '\0';
+
+    const char *iata = _uplink_creds.mqtt_iata[0] ? _uplink_creds.mqtt_iata : "XXX";
+    snprintf(_uplink_packets_topic, sizeof(_uplink_packets_topic),
+             "meshcore/%s/%s/packets", iata, _uplink_pubkey_hex);
+    snprintf(_uplink_status_topic, sizeof(_uplink_status_topic),
+             "meshcore/%s/%s/status", iata, _uplink_pubkey_hex);
+
+    if (isUplinkEnabled() && _uplink_creds.wifi_ssid[0] && _uplink_creds.mqtt_host[0]) {
+        s_uplink_mesh = this;
+        zc_wifi_station_start(&_uplink_creds, uplink_time_sync_cb);
+        mqtt_publisher_start(&_uplink_creds, _prefs.node_name,
+                             _uplink_status_topic, _uplink_packets_topic);
+        LOG_INF("Repeater uplink active: %s", _uplink_packets_topic);
+    } else {
+        LOG_INF("Repeater uplink inactive");
+    }
+#endif
 }
 
 double RepeaterMesh::getNodeLat() const {
@@ -1037,6 +1095,12 @@ void RepeaterMesh::handleCommand(uint32_t sender_timestamp, char* command, char*
         command += 3;
     }
 
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+    if (handleUplinkCommand(command, reply)) {
+        return;
+    }
+#endif
+
     // ACL commands - supports BOTH formats for app compatibility:
     //   Old Arduino: setperm {pubkey-hex} {permissions}   (pubkey is long, perms is short)
     //   MeshCore App: setperm {permissions} {pubkey-hex}  (perms is short 2-char hex, pubkey is long)
@@ -1201,6 +1265,172 @@ void RepeaterMesh::handleCommand(uint32_t sender_timestamp, char* command, char*
         _cli.handleCommand(sender_timestamp, command, reply);
     }
 }
+
+#if IS_ENABLED(CONFIG_ZEPHCORE_REPEATER_UPLINK) && IS_ENABLED(CONFIG_MQTT_LIB)
+bool RepeaterMesh::saveUplinkCreds()
+{
+    if (!_store) return false;
+    return observer_creds_save(&_uplink_creds, _store->getBasePath());
+}
+
+bool RepeaterMesh::handleUplinkCommand(const char *command, char *reply)
+{
+    if (memcmp(command, "get uplink.", 11) == 0) {
+        const char *key = command + 11;
+        if (strcmp(key, "enable") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %s", isUplinkEnabled() ? "on" : "off");
+        } else if (strcmp(key, "wifi.ssid") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %s", _uplink_creds.wifi_ssid[0] ? _uplink_creds.wifi_ssid : "(not set)");
+        } else if (strcmp(key, "mqtt.host") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %s", _uplink_creds.mqtt_host[0] ? _uplink_creds.mqtt_host : "(not set)");
+        } else if (strcmp(key, "mqtt.port") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %u", (unsigned)_uplink_creds.mqtt_port);
+        } else if (strcmp(key, "mqtt.tls") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %u", (unsigned)_uplink_creds.mqtt_tls);
+        } else if (strcmp(key, "mqtt.user") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %s", _uplink_creds.mqtt_user[0] ? _uplink_creds.mqtt_user : "(not set)");
+        } else if (strcmp(key, "mqtt.iata") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %s", _uplink_creds.mqtt_iata[0] ? _uplink_creds.mqtt_iata : "(not set)");
+        } else if (strcmp(key, "status") == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> enabled=%s wifi=%s mqtt=%s reboot_required=%s",
+                     isUplinkEnabled() ? "yes" : "no",
+                     zc_wifi_station_is_connected() ? "up" : "down",
+                     mqtt_publisher_is_connected() ? "up" : "down",
+                     _uplink_reboot_required ? "yes" : "no");
+        } else {
+            snprintf(reply, CLI_REPLY_SIZE, "unknown config: uplink.%s", key);
+        }
+        return true;
+    }
+
+    if (memcmp(command, "set uplink.", 11) == 0) {
+        const char *cfg = command + 11;
+        const char *val = strchr(cfg, ' ');
+        if (!val) {
+            strcpy(reply, "Error: value required");
+            return true;
+        }
+        int key_len = (int)(val - cfg);
+        val++;
+
+        if (key_len == 6 && memcmp(cfg, "enable", 6) == 0) {
+            if (strcmp(val, "on") == 0) {
+                setUplinkEnabled(true);
+            } else if (strcmp(val, "off") == 0) {
+                setUplinkEnabled(false);
+            } else {
+                strcpy(reply, "Error: must be on or off");
+                return true;
+            }
+        } else if (key_len == 9 && memcmp(cfg, "wifi.ssid", 9) == 0) {
+            StrHelper::strncpy(_uplink_creds.wifi_ssid, val, sizeof(_uplink_creds.wifi_ssid));
+        } else if (key_len == 8 && memcmp(cfg, "wifi.psk", 8) == 0) {
+            StrHelper::strncpy(_uplink_creds.wifi_psk, val, sizeof(_uplink_creds.wifi_psk));
+        } else if (key_len == 9 && memcmp(cfg, "mqtt.host", 9) == 0) {
+            StrHelper::strncpy(_uplink_creds.mqtt_host, val, sizeof(_uplink_creds.mqtt_host));
+        } else if (key_len == 9 && memcmp(cfg, "mqtt.port", 9) == 0) {
+            int port = atoi(val);
+            if (port < 1 || port > 65535) {
+                strcpy(reply, "Error: port range 1-65535");
+                return true;
+            }
+            _uplink_creds.mqtt_port = (uint16_t)port;
+        } else if (key_len == 8 && memcmp(cfg, "mqtt.tls", 8) == 0) {
+            _uplink_creds.mqtt_tls = (atoi(val) != 0) ? 1 : 0;
+        } else if (key_len == 9 && memcmp(cfg, "mqtt.user", 9) == 0) {
+            StrHelper::strncpy(_uplink_creds.mqtt_user, val, sizeof(_uplink_creds.mqtt_user));
+        } else if (key_len == 13 && memcmp(cfg, "mqtt.password", 13) == 0) {
+            StrHelper::strncpy(_uplink_creds.mqtt_password, val, sizeof(_uplink_creds.mqtt_password));
+        } else if (key_len == 9 && memcmp(cfg, "mqtt.iata", 9) == 0) {
+            StrHelper::strncpy(_uplink_creds.mqtt_iata, val, sizeof(_uplink_creds.mqtt_iata));
+        } else {
+            snprintf(reply, CLI_REPLY_SIZE, "unknown config: uplink.%.*s", key_len, cfg);
+            return true;
+        }
+
+        if (!saveUplinkCreds()) {
+            strcpy(reply, "Error: save failed");
+            return true;
+        }
+        markUplinkRebootRequired();
+        strcpy(reply, "OK - reboot to apply");
+        return true;
+    }
+
+    return false;
+}
+
+void RepeaterMesh::publishUplinkPacket(mesh::Packet *pkt)
+{
+    if (!isUplinkEnabled() || !mqtt_publisher_is_connected()) return;
+    if (_uplink_packets_topic[0] == '\0') return;
+
+    char raw_hex[MAX_TRANS_UNIT * 2 + 1];
+    mesh::Utils::toHex(raw_hex, _uplink_last_raw, _uplink_last_raw_len);
+    raw_hex[_uplink_last_raw_len * 2] = '\0';
+
+    uint8_t hash_bytes[MAX_HASH_SIZE];
+    char hash_hex[MAX_HASH_SIZE * 2 + 1];
+    pkt->calculatePacketHash(hash_bytes);
+    mesh::Utils::toHex(hash_hex, hash_bytes, MAX_HASH_SIZE);
+    hash_hex[MAX_HASH_SIZE * 2] = '\0';
+
+    uint32_t now_epoch = getRTCClock()->getCurrentTime();
+    struct tm tm_now;
+    time_t t = (time_t)now_epoch;
+    gmtime_r(&t, &tm_now);
+
+    char ts_buf[48];
+    char time_buf[12], date_buf[32];
+    snprintf(ts_buf, sizeof(ts_buf), "%04d-%02d-%02dT%02d:%02d:%02d.000000",
+             tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday,
+             tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec);
+    snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d",
+             tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec);
+    snprintf(date_buf, sizeof(date_buf), "%d/%d/%04d",
+             tm_now.tm_mday, tm_now.tm_mon + 1, tm_now.tm_year + 1900);
+
+    static char json_buf[1024];
+    int json_len = snprintf(json_buf, sizeof(json_buf),
+        "{"
+        "\"type\":\"PACKET\","
+        "\"origin\":\"%s\","
+        "\"origin_id\":\"%s\","
+        "\"timestamp\":\"%s\","
+        "\"direction\":\"rx\","
+        "\"time\":\"%s\","
+        "\"date\":\"%s\","
+        "\"len\":\"%d\","
+        "\"packet_type\":\"%u\","
+        "\"route\":\"%s\","
+        "\"payload_len\":\"%u\","
+        "\"raw\":\"%s\","
+        "\"SNR\":\"%d\","
+        "\"RSSI\":\"%d\","
+        "\"score\":\"%d\","
+        "\"hash\":\"%s\""
+        "}",
+        _prefs.node_name,
+        _uplink_pubkey_hex,
+        ts_buf,
+        time_buf,
+        date_buf,
+        _uplink_last_raw_len,
+        (unsigned)pkt->getPayloadType(),
+        pkt->isRouteDirect() ? "D" : "F",
+        (unsigned)pkt->payload_len,
+        raw_hex,
+        (int)pkt->getSNR(),
+        (int)_uplink_last_rssi,
+        (int)(_uplink_last_score * 1000.0f),
+        hash_hex);
+
+    if (json_len <= 0 || json_len >= (int)sizeof(json_buf)) {
+        return;
+    }
+    mqtt_publisher_enqueue(_uplink_packets_topic, json_buf, json_len);
+}
+#endif
 
 void RepeaterMesh::loop() {
     mesh::Mesh::loop();
