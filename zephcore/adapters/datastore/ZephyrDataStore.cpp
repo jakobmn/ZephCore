@@ -11,6 +11,7 @@
 #include <zephyr/fs/littlefs.h>
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/device.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <zephyr/logging/log.h>
@@ -85,28 +86,7 @@ void ZephyrDataStore::begin()
 		migrateToExternalFS();
 	}
 
-	/* Clean up stale .tmp files from interrupted saves.
-	 * If a .tmp file exists, the save was interrupted before the
-	 * atomic rename — the original file is still intact. */
-	cleanStaleTmpFiles();
-
 	checkAdvBlobFile();
-}
-
-void ZephyrDataStore::cleanStaleTmpFiles()
-{
-	const char *paths[] = { contactsFile(), channelsFile(), advBlobsFile() };
-	char tmp_path[48];
-	for (size_t i = 0; i < ARRAY_SIZE(paths); i++) {
-		snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", paths[i]);
-		struct fs_dirent ent;
-		if (fs_stat(tmp_path, &ent) == 0) {
-			LOG_INF("PREVIOUS REBOOT CORRUPTED FS! "
-				"Deleting temp file: %s (%zu bytes)",
-				tmp_path, ent.size);
-			fs_unlink(tmp_path);
-		}
-	}
 }
 
 bool ZephyrDataStore::exists(const char *path)
@@ -137,24 +117,61 @@ bool ZephyrDataStore::openRead(const char *path, uint8_t *buf, size_t buf_sz, si
 	return true;
 }
 
-bool ZephyrDataStore::openWrite(const char *path, const uint8_t *buf, size_t len)
+/* Power-safe replace: used for identity + prefs; channels use the same .tmp/sync/rename in saveChannels(). Contacts stay direct write (space). */
+bool ZephyrDataStore::atomicReplaceFile(const char *path, const uint8_t *buf, size_t len)
 {
-	fs_unlink(path);
+	char tmp_path[56];
+	int pl = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+	if (pl <= 0 || pl >= (int)sizeof(tmp_path)) {
+		LOG_ERR("atomicReplaceFile: path too long");
+		return false;
+	}
+
+	fs_unlink(tmp_path);
 
 	struct fs_file_t file;
 	fs_file_t_init(&file);
-	int rc = fs_open(&file, path, FS_O_CREATE | FS_O_WRITE);
+	int rc = fs_open(&file, tmp_path, FS_O_CREATE | FS_O_WRITE);
 	if (rc < 0) {
-		LOG_ERR("openWrite: fs_open(%s) failed: %d", path, rc);
+		LOG_ERR("atomicReplaceFile: open %s failed: %d", tmp_path, rc);
 		return false;
 	}
+
 	ssize_t n = fs_write(&file, buf, len);
+	if (n < 0 || (size_t)n != len) {
+		LOG_ERR("atomicReplaceFile: write %s failed (%d)", tmp_path, (int)n);
+		fs_close(&file);
+		fs_unlink(tmp_path);
+		return false;
+	}
+
+	rc = fs_sync(&file);
 	fs_close(&file);
-	return n >= 0 && (size_t)n == len;
+	if (rc < 0) {
+		LOG_ERR("atomicReplaceFile: sync %s failed: %d", tmp_path, rc);
+		fs_unlink(tmp_path);
+		return false;
+	}
+
+	rc = fs_rename(tmp_path, path);
+	if (rc < 0) {
+		LOG_ERR("atomicReplaceFile: rename %s -> %s failed: %d", tmp_path, path, rc);
+		fs_unlink(tmp_path);
+		return false;
+	}
+	return true;
 }
 
 bool ZephyrDataStore::copyFile(const char *src, const char *dst)
 {
+	char tmp_path[64];
+	int pl = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", dst);
+	if (pl <= 0 || pl >= (int)sizeof(tmp_path)) {
+		return false;
+	}
+
+	fs_unlink(tmp_path);
+
 	struct fs_file_t src_file, dst_file;
 	fs_file_t_init(&src_file);
 	fs_file_t_init(&dst_file);
@@ -163,8 +180,7 @@ bool ZephyrDataStore::copyFile(const char *src, const char *dst)
 		return false;
 	}
 
-	fs_unlink(dst);
-	if (fs_open(&dst_file, dst, FS_O_CREATE | FS_O_WRITE) < 0) {
+	if (fs_open(&dst_file, tmp_path, FS_O_CREATE | FS_O_WRITE) < 0) {
 		fs_close(&src_file);
 		return false;
 	}
@@ -180,8 +196,24 @@ bool ZephyrDataStore::copyFile(const char *src, const char *dst)
 	}
 
 	fs_close(&src_file);
+	if (!ok || n < 0) {
+		fs_close(&dst_file);
+		fs_unlink(tmp_path);
+		return false;
+	}
+
+	int rc = fs_sync(&dst_file);
 	fs_close(&dst_file);
-	return ok && n >= 0;
+	if (rc < 0) {
+		fs_unlink(tmp_path);
+		return false;
+	}
+
+	if (fs_rename(tmp_path, dst) < 0) {
+		fs_unlink(tmp_path);
+		return false;
+	}
+	return true;
 }
 
 void ZephyrDataStore::migrateToExternalFS()
@@ -327,7 +359,7 @@ bool ZephyrDataStore::saveMainIdentity(const mesh::LocalIdentity &identity)
 	if (n == 0) {
 		return false;
 	}
-	return openWrite(MAIN_ID_FILE, buf, n);
+	return atomicReplaceFile(MAIN_ID_FILE, buf, n);
 }
 
 /* ── Preferences ───────────────────────────────────────────────────── */
@@ -480,7 +512,7 @@ void ZephyrDataStore::savePrefs(const NodePrefs &prefs)
 	buf[off++] = prefs.apc_margin;
 	/* Total: 96 bytes (Arduino reads 92, ZephCore reads 96) */
 
-	bool ok = openWrite(PREFS_FILE, buf, off);
+	bool ok = atomicReplaceFile(PREFS_FILE, buf, off);
 	LOG_DBG("savePrefs: wrote %s, ok=%d (%d bytes), name='%.16s'",
 		PREFS_FILE, ok ? 1 : 0, (int)off, prefs.node_name);
 }
@@ -632,28 +664,46 @@ void ZephyrDataStore::loadChannels(DataStoreHost *host)
 void ZephyrDataStore::saveChannels(DataStoreHost *host)
 {
 	const char *path = channelsFile();
-
-	if (exists(path)) {
-		fs_unlink(path);
+	char tmp_path[56];
+	int pl = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+	if (pl <= 0 || pl >= (int)sizeof(tmp_path)) {
+		LOG_ERR("saveChannels: path too long");
+		return;
 	}
+
+	fs_unlink(tmp_path);
 
 	struct fs_file_t file;
 	fs_file_t_init(&file);
-	if (fs_open(&file, path, FS_O_CREATE | FS_O_WRITE) < 0) {
-		LOG_ERR("saveChannels: fs_open(%s) failed", path);
+	if (fs_open(&file, tmp_path, FS_O_CREATE | FS_O_WRITE) < 0) {
+		LOG_ERR("saveChannels: fs_open(%s) failed", tmp_path);
 		return;
 	}
 	uint8_t channel_idx = 0;
 	ChannelDetails ch;
 	uint8_t unused[4] = {0};
+	bool write_ok = true;
 	while (host->getChannelForSave(channel_idx, ch)) {
-		if (fs_write(&file, unused, 4) != 4) break;
-		if (fs_write(&file, (uint8_t *)ch.name, 32) != 32) break;
-		if (fs_write(&file, (uint8_t *)ch.channel.secret, 32) != 32) break;
+		if (fs_write(&file, unused, 4) != 4 ||
+		    fs_write(&file, (uint8_t *)ch.name, 32) != 32 ||
+		    fs_write(&file, (uint8_t *)ch.channel.secret, 32) != 32) {
+			write_ok = false;
+			break;
+		}
 		channel_idx++;
 	}
-	fs_sync(&file);
+	int sync_rc = fs_sync(&file);
 	fs_close(&file);
+	if (!write_ok || sync_rc < 0) {
+		LOG_ERR("saveChannels: write/sync failed");
+		fs_unlink(tmp_path);
+		return;
+	}
+	if (fs_rename(tmp_path, path) < 0) {
+		LOG_ERR("saveChannels: rename %s failed", tmp_path);
+		fs_unlink(tmp_path);
+		return;
+	}
 	LOG_INF("saveChannels: saved %u channels to %s", channel_idx, path);
 }
 

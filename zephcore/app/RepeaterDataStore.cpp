@@ -83,31 +83,42 @@ bool RepeaterDataStore::saveIdentity(const mesh::LocalIdentity& id) {
     if (!_initialized) begin();
 
     char path[48];
+    char tmp_path[56];
     snprintf(path, sizeof(path), "%s/_main.id", BASE_PATH);
+    if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) >= (int)sizeof(tmp_path)) {
+        return false;
+    }
 
-    fs_unlink(path);
+    fs_unlink(tmp_path);
 
     struct fs_file_t file;
     fs_file_t_init(&file);
 
-    int ret = fs_open(&file, path, FS_O_CREATE | FS_O_WRITE);
+    int ret = fs_open(&file, tmp_path, FS_O_CREATE | FS_O_WRITE);
     if (ret < 0) {
-        LOG_ERR("Failed to open %s for write: %d", path, ret);
+        LOG_ERR("Failed to open %s for write: %d", tmp_path, ret);
         return false;
     }
 
     uint8_t buf[PRV_KEY_SIZE];
     int len = id.writeTo(buf, sizeof(buf));
     ssize_t n = fs_write(&file, buf, len);
+    ret = fs_sync(&file);
     fs_close(&file);
 
-    if (n == len) {
-        LOG_INF("Saved identity to %s", path);
-        return true;
+    if (n != len || ret < 0) {
+        LOG_ERR("Failed to write identity: wrote %d of %d sync=%d", (int)n, len, ret);
+        fs_unlink(tmp_path);
+        return false;
     }
 
-    LOG_ERR("Failed to write identity: wrote %d of %d", (int)n, len);
-    return false;
+    if (fs_rename(tmp_path, path) < 0) {
+        LOG_ERR("saveIdentity: rename failed");
+        fs_unlink(tmp_path);
+        return false;
+    }
+    LOG_INF("Saved identity to %s", path);
+    return true;
 }
 
 bool RepeaterDataStore::loadPrefs(NodePrefs& prefs) {
@@ -198,16 +209,20 @@ bool RepeaterDataStore::savePrefs(const NodePrefs& prefs) {
     if (!_initialized) begin();
 
     char path[48];
+    char tmp_path[56];
     snprintf(path, sizeof(path), "%s/prefs", BASE_PATH);
+    if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) >= (int)sizeof(tmp_path)) {
+        return false;
+    }
 
-    fs_unlink(path);
+    fs_unlink(tmp_path);
 
     struct fs_file_t file;
     fs_file_t_init(&file);
 
-    int ret = fs_open(&file, path, FS_O_CREATE | FS_O_WRITE);
+    int ret = fs_open(&file, tmp_path, FS_O_CREATE | FS_O_WRITE);
     if (ret < 0) {
-        LOG_ERR("Failed to open %s for write: %d", path, ret);
+        LOG_ERR("Failed to open %s for write: %d", tmp_path, ret);
         return false;
     }
 
@@ -251,7 +266,19 @@ bool RepeaterDataStore::savePrefs(const NodePrefs& prefs) {
     fs_write(&file, &prefs.adc_multiplier, sizeof(prefs.adc_multiplier));
     fs_write(&file, prefs.owner_info, sizeof(prefs.owner_info));
 
+    ret = fs_sync(&file);
     fs_close(&file);
+    if (ret < 0) {
+        LOG_ERR("savePrefs: sync failed: %d", ret);
+        fs_unlink(tmp_path);
+        return false;
+    }
+
+    if (fs_rename(tmp_path, path) < 0) {
+        LOG_ERR("savePrefs: rename failed");
+        fs_unlink(tmp_path);
+        return false;
+    }
     LOG_INF("Saved prefs to %s", path);
     return true;
 }
