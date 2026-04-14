@@ -206,8 +206,11 @@ Boards that define a `buttons:` gpio-keys node must add at the END of their DTS:
 
     #include "../../common/nrf52_wakeup.dtsi"
 
-Boards WITHOUT a `buttons` label (ikoka_nano, rak4631) must NOT include it —
+Boards WITHOUT a `buttons` label (ikoka_nano) must NOT include it —
 referencing an undefined `&buttons` label is a hard build error.
+
+**RAK4631 user button:** `gpio-keys` on **P0.09** (NFC1). Short → next page (after
+tap window), double-tap → previous page, long press (≥1s) → enter / activate.
 
 
 What Goes in board.conf
@@ -282,19 +285,12 @@ Note: nRF52840 D-pin mapping varies by board (XIAO nRF52840 shown).
 RAK4631 has SX1262 integrated — different pinout entirely.
 
 
-RAK4631 user LEDs (upstream board + overlay)
---------------------------------------------
+RAK4631 LEDs and overlay (RAK4631)
+-----------------------------------
 
-ZephCore’s `boards/nrf52840/rak4631/board.overlay` augments Zephyr’s stock RAK4631
-definition. Future changes to that overlay should keep the following in mind:
-
-**Polarity:** Upstream Zephyr marks the WisBlock user LEDs (`green_led` / `blue_led`
-on P1.3 / P1.4) as `GPIO_ACTIVE_LOW`. On actual RAK4631 + base-board hardware they
-match MeshCore / Arduino (`LED_STATE_ON` = HIGH). If the polarity in devicetree is
-wrong, both LEDs stay **on** most of the time and the heartbeat looks like a **short
-off** pulse (inverted). Override both nodes in the overlay with `GPIO_ACTIVE_HIGH`.
-
-**Aliases:** Upstream defines only `led0` → blue. ZephCore sets `led0` → green
-(heartbeat), `led1` → blue (companion unread pulse), and `lora-tx-led` → blue (LoRa
-TX activity). Repeaters disable the unread-LED path in firmware so blue is TX-only
-alongside green heartbeat.
+- **Polarity:** Stock Zephyr RAK4631 DTS uses `GPIO_ACTIVE_LOW` for the two user
+  LEDs (P1.3 / P1.4). On hardware here they are **active-high** — the overlay
+  overrides `green_led` / `blue_led` to `GPIO_ACTIVE_HIGH`.
+- **Aliases:** Overlay sets `led0`→green (heartbeat), `led1`→blue (unread +
+  LoRa TX blink via `lora-tx-led`). On repeaters, firmware does not drive the
+  second LED as “unread”; blue stays TX-only.

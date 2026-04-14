@@ -3,7 +3,7 @@
  * App at 0x26000, storage at 0xD4000, bootloader at 0xF4000.
  * Uses SoftDevice s140 v6.1.1 (ends at 0x26000).
  * Console: USB CDC ACM.
- * Battery: AIN3 = P0.05 (Arduino pin 5), voltage divider per RAK4631 schematic.
+ * Battery: AIN3 = P0.05, voltage divider per RAK4631 schematic.
  *
  * QSPI Flash: Optional external flash on WisBlock Base boards.
  * Supports: P25Q16H, MX25R1635F, W25Q16, GD25Q16, IS25LP080, ZD25WQ16
@@ -15,12 +15,13 @@
  *   - RAK1902 (LPS22HB) at 0x5C
  *   - RAK1906 (BME680) at 0x76
  *
- * Optional WisBlock OLED (MeshCore Arduino: SSD1306 128x64 @ 0x3C on I2C0
- * P0.13/P0.14, no reset GPIO). If the panel is absent, display init may fail
+ * Optional SSD1306 128x64 @ 0x3C on I2C0 (P0.13/P0.14, no reset GPIO).
+ * If the panel is absent, display init may fail
  * at runtime; UI continues without OLED.
  */
 
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
@@ -29,11 +30,11 @@
 
 / {
 	aliases {
-		/* Upstream: led0=blue only. ZephCore: green=heartbeat (led0), blue=unread+TX flash.
-		 * lora-tx-led drives blue during LoRa TX (repeater: TX-only on blue; companion: + msg). */
+		/* leds: green=heartbeat, blue=unread + LoRa TX; lora-tx-led=blue */
 		led0 = &green_led;
 		led1 = &blue_led;
 		lora-tx-led = &blue_led;
+		sw0 = &user_button;
 	};
 	chosen {
 		zephyr,code-partition = &code_partition;
@@ -41,13 +42,41 @@
 		zephyr,shell-uart = &cdc_acm_uart;
 		zephyr,display = &ssd1306;
 	};
+
+	/* User button: P0.09 (NFC1). P0.00/P0.01 are 32k crystal — do not use for GPIO. */
+	buttons: buttons {
+		compatible = "gpio-keys";
+
+		user_button: button_0 {
+			gpios = <&gpio0 9 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			zephyr,code = <INPUT_KEY_0>;
+			label = "User Button";
+		};
+	};
+
+	/* longpress: short=KEY_A (multitap), long=KEY_ENTER */
+	user_btn_longpress {
+		compatible = "zephyr,input-longpress";
+		input = <&buttons>;
+		input-codes = <INPUT_KEY_0>;
+		short-codes = <INPUT_KEY_A>;
+		long-codes = <INPUT_KEY_ENTER>;
+		long-delay-ms = <1000>;
+	};
+
+	page_btn_multitap {
+		compatible = "zephcore,input-multi-tap";
+		input-codes = <INPUT_KEY_A>;
+		tap-codes = <INPUT_KEY_1 INPUT_KEY_LEFT>;
+		tap-delay-ms = <400>;
+	};
 };
 
 /* Battery ADC - AIN3 on P0.05 with voltage divider */
 / {
 	zephyr,user {
 		io-channels = <&adc 3>;
-		vbat-mv-multiplier = <6161>;  /* Arduino: (3 * 1.73 * 1.187 * 1000) ≈ 6161, GAIN_1_6 + 0.6V ref */
+		vbat-mv-multiplier = <6161>;  /* matches RAK4631 divider + SAADC ref */
 	};
 };
 
@@ -75,7 +104,7 @@
        rx-boosted;
 };
 
-/* Upstream board uses GPIO_ACTIVE_LOW; hardware matches MeshCore Arduino LED_STATE_ON=HIGH. */
+/* LEDs are active-high on this board (stock RAK4631 DTS used active-low). */
 &green_led {
 	gpios = <&gpio1 3 GPIO_ACTIVE_HIGH>;
 };
@@ -95,9 +124,7 @@
 	};
 };
 
-/*
- * I2C0: optional SSD1306 OLED + environment sensors (same bus as MeshCore RAK4631).
- */
+/* I2C0: optional SSD1306 + sensors */
 &i2c0 {
 	ssd1306: ssd1306@3c {
 		compatible = "solomon,ssd1306";
@@ -136,5 +163,6 @@
 	status = "disabled";
 };
 
-/* Arduino MeshCore compatible partition layout (SoftDevice v6) */
+/* SoftDevice v6 flash layout */
 #include "../../common/nrf52_partitions_sdv6.dtsi"
+#include "../../common/nrf52_wakeup.dtsi"
