@@ -133,6 +133,10 @@ bool RepeaterDataStore::loadPrefs(NodePrefs& prefs) {
         LOG_DBG("No prefs file at %s, using defaults", path);
         initNodePrefs(&prefs);
         strcpy(prefs.node_name, "Repeater");
+        prefs.advert_loc_policy = ADVERT_LOC_PREFS;
+        prefs.flood_advert_interval = 25;
+        prefs.loop_detect = LOOP_DETECT_MINIMAL;
+        prefs.path_hash_mode = 1;
         return true;
     }
 
