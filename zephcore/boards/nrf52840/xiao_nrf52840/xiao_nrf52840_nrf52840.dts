@@ -89,8 +89,8 @@
 
 	zephyr,user {
 		io-channels = <&adc 7>;
-		/* MeshCore: mV ≈ raw * 3 * 3 / 4096 at 12-bit internal 3.0V ref */
-		vbat-mv-multiplier = <9000>;
+		/* mV = raw * mult / 4096; mult from two-point DMM calibration (Zephyr SAADC path) */
+		vbat-mv-multiplier = <10911>;
 	};
 
 	aliases {
