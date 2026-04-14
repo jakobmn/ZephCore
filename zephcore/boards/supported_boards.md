@@ -18,6 +18,8 @@ promicro_lr2021
 sensecap_solar
 ```
 
+> **RAK WisMesh Pocket** (WisBlock pocket): use `-b rak4631` — same board string and firmware as **RAK4631**.
+
 ## ESP32
 
 ```
