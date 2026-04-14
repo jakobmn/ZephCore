@@ -1,0 +1,9 @@
+# Copyright (c) 2025 ZephCore
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: xiao_nrf52840
+  full_name: Seeed XIAO nRF52840 (Wio-SX1262)
+  vendor: seeed
+  socs:
+  - name: nrf52840

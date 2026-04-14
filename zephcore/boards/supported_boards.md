@@ -15,6 +15,7 @@ thinknode_m6
 rak_wismesh_tag
 ikoka_nano_30dbm
 sensecap_solar
+xiao_nrf52840
 ```
 
 > **RAK WisMesh Pocket** (WisBlock pocket): use `-b rak4631` — same board string and firmware as **RAK4631**.

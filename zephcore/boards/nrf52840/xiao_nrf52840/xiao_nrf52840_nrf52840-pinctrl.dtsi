@@ -1,0 +1,66 @@
+/*
+ * Seeed XIAO nRF52840 + Wio-SX1262 (headers) — pin control
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * MeshCore variants/xiao_nrf52 variant.cpp + platformio.ini:
+ * - SPI2 (SX1262): SCK=P1.13, MOSI=P1.15, MISO=P1.14 (D8–D10)
+ * - I2C0: SDA=P1.12, SCL=P1.11 (MeshCore PIN_WIRE_SDA=D7, PIN_WIRE_SCL=D6)
+ * - QSPI P25Q16H: same as other XIAO nRF52840 designs
+ */
+
+&pinctrl {
+	spi2_default: spi2_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 13)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 15)>,
+				<NRF_PSEL(SPIM_MISO, 1, 14)>;
+		};
+	};
+
+	spi2_sleep: spi2_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 13)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 15)>,
+				<NRF_PSEL(SPIM_MISO, 1, 14)>;
+			low-power-enable;
+		};
+	};
+
+	i2c0_default: i2c0_default {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 1, 12)>,
+				<NRF_PSEL(TWIM_SCL, 1, 11)>;
+		};
+	};
+
+	i2c0_sleep: i2c0_sleep {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 1, 12)>,
+				<NRF_PSEL(TWIM_SCL, 1, 11)>;
+			low-power-enable;
+		};
+	};
+
+	qspi_default: qspi_default {
+		group1 {
+			psels = <NRF_PSEL(QSPI_SCK, 0, 21)>,
+				<NRF_PSEL(QSPI_IO0, 0, 20)>,
+				<NRF_PSEL(QSPI_IO1, 0, 24)>,
+				<NRF_PSEL(QSPI_IO2, 0, 22)>,
+				<NRF_PSEL(QSPI_IO3, 0, 23)>,
+				<NRF_PSEL(QSPI_CSN, 0, 25)>;
+		};
+	};
+
+	qspi_sleep: qspi_sleep {
+		group1 {
+			psels = <NRF_PSEL(QSPI_SCK, 0, 21)>,
+				<NRF_PSEL(QSPI_IO0, 0, 20)>,
+				<NRF_PSEL(QSPI_IO1, 0, 24)>,
+				<NRF_PSEL(QSPI_IO2, 0, 22)>,
+				<NRF_PSEL(QSPI_IO3, 0, 23)>,
+				<NRF_PSEL(QSPI_CSN, 0, 25)>;
+			low-power-enable;
+		};
+	};
+};

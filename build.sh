@@ -16,6 +16,7 @@ nRF_boards=(
     rak_wismesh_tag
     ikoka_nano_30dbm
     sensecap_solar
+    xiao_nrf52840
 )
 
 ESP32_boards=(
