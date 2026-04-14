@@ -14,6 +14,10 @@
  *   - RAK1901 (SHTC3) at 0x70
  *   - RAK1902 (LPS22HB) at 0x5C
  *   - RAK1906 (BME680) at 0x76
+ *
+ * Optional WisBlock OLED (MeshCore Arduino: SSD1306 128x64 @ 0x3C on I2C0
+ * P0.13/P0.14, no reset GPIO). If the panel is absent, display init may fail
+ * at runtime; UI continues without OLED.
  */
 
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
@@ -31,6 +35,7 @@
 		zephyr,code-partition = &code_partition;
 		zephyr,console = &cdc_acm_uart;
 		zephyr,shell-uart = &cdc_acm_uart;
+		zephyr,display = &ssd1306;
 	};
 };
 
@@ -78,11 +83,24 @@
 };
 
 /*
- * Environment & power sensors on I2C0
- * All supported sensors pre-defined — auto-detected at runtime.
- * WisBlock modules: RAK1901 (SHTC3), RAK1902 (LPS22HB), RAK1906 (BME680)
+ * I2C0: optional SSD1306 OLED + environment sensors (same bus as MeshCore RAK4631).
  */
 &i2c0 {
+	ssd1306: ssd1306@3c {
+		compatible = "solomon,ssd1306";
+		reg = <0x3c>;
+		width = <128>;
+		height = <64>;
+		segment-offset = <0>;
+		page-offset = <0>;
+		display-offset = <0>;
+		multiplex-ratio = <63>;
+		segment-remap;
+		com-invdir;
+		inversion-on;
+		prechargep = <0x22>;
+	};
+
 	#include "../../common/sensors-i2c.dtsi"
 };
 
