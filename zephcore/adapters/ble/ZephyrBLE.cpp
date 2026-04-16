@@ -6,9 +6,8 @@
  * Pairing is triggered reactively by ATT_ERR_AUTHENTICATION on secured GATT
  * attributes (Apple §55 compliant — no proactive Security Request on connect).
  *
- * Advertising: Public identity address (CONFIG_BT_PRIVACY disabled).
- * Android's Flutter BLE plugin fails to connectGatt() to RPA-advertised devices
- * from app context.  Arduino MeshCore also uses public addresses.
+ * Advertising: ESP32 enables CONFIG_BT_PRIVACY in esp32_common.conf; nRF uses public identity.
+ * Android Flutter may fail connect-from-app to RPA unless bonded; Arduino MeshCore uses public.
  */
 
 #include <stdio.h>
