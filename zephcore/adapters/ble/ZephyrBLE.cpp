@@ -400,22 +400,6 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 	}
 }
 
-static bool le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param)
-{
-	/* Enforce our configured connection parameters — reject anything
-	 * outside our preferred range.  The phone will fall back to our
-	 * PPCP (Peripheral Preferred Connection Parameters) on rejection. */
-	if (param->interval_min < BLE_DEFAULT_MIN_INTERVAL ||
-	    param->interval_max > BLE_DEFAULT_MAX_INTERVAL) {
-		LOG_WRN("Rejecting peer conn params: interval %u-%u "
-			"(our range: %u-%u)",
-			param->interval_min, param->interval_max,
-			BLE_DEFAULT_MIN_INTERVAL, BLE_DEFAULT_MAX_INTERVAL);
-		return false;
-	}
-	return true;
-}
-
 static void le_param_updated(struct bt_conn *conn, uint16_t interval,
 			    uint16_t latency, uint16_t timeout)
 {
@@ -484,7 +468,6 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
 	.recycled = recycled,
-	.le_param_req = le_param_req,
 	.le_param_updated = le_param_updated,
 	.security_changed = security_changed,
 #if defined(CONFIG_BT_USER_PHY_UPDATE)
