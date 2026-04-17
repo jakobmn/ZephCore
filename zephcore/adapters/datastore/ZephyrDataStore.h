@@ -38,6 +38,7 @@ public:
 	uint8_t getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]);
 	bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], uint8_t len);
 	bool deleteBlobByKey(const uint8_t key[], int key_len);
+	/* Used/total KiB for BLE storage report: /ext when mounted, else /lfs (Arduino parity). */
 	uint32_t getStorageUsedKb() const;
 	uint32_t getStorageTotalKb() const;
 

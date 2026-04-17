@@ -437,6 +437,30 @@ bool RepeaterMesh::isLooped(const mesh::Packet* packet, const uint8_t max_counte
     return n >= max_counters[hash_size];
 }
 
+void RepeaterMesh::sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt, uint32_t delay_millis, uint8_t path_hash_size) {
+    if (scope.isNull()) {
+        sendFlood(pkt, delay_millis, path_hash_size);
+    } else {
+        uint16_t codes[2];
+        codes[0] = scope.calcTransportCode(pkt);
+        codes[1] = 0;  // REVISIT: set to 'home' Region, for sender/return region?
+        sendFlood(pkt, codes, delay_millis, path_hash_size);
+    }
+}
+
+void RepeaterMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, uint8_t path_hash_size) {
+    if (recv_pkt_region && !recv_pkt_region->isWildcard()) {  // if _request_ packet scope is known, send reply with same scope
+        TransportKey scope;
+        if (region_map.getTransportKeysFor(*recv_pkt_region, &scope, 1) > 0) {
+            sendFloodScoped(scope, packet, delay_millis, path_hash_size);
+        } else {
+            sendFlood(packet, delay_millis, path_hash_size);  // send un-scoped
+        }
+    } else {
+        sendFlood(packet, delay_millis, path_hash_size);  // send un-scoped
+    }
+}
+
 bool RepeaterMesh::allowPacketForward(const mesh::Packet* packet) {
     if (_prefs.disable_fwd) return false;
     if (packet->isRouteFlood() && packet->getPathHashCount() >= _prefs.flood_max) return false;
@@ -586,10 +610,10 @@ void RepeaterMesh::onAnonDataRecv(mesh::Packet* packet, const uint8_t* secret, c
         if (packet->isRouteFlood()) {
             mesh::Packet* path = createPathReturn(sender, secret, packet->path, packet->path_len,
                                                   PAYLOAD_TYPE_RESPONSE, reply_data, reply_len);
-            if (path) sendFlood(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+            if (path) sendFloodReply(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
         } else if (reply_path_len == OUT_PATH_UNKNOWN) {
             mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret, reply_data, reply_len);
-            if (reply) sendFlood(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+            if (reply) sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
         } else {
             mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret, reply_data, reply_len);
             if (reply) sendDirect(reply, reply_path, reply_path_len, SERVER_RESPONSE_DELAY);
@@ -656,14 +680,14 @@ void RepeaterMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
             if (packet->isRouteFlood()) {
                 mesh::Packet* path = createPathReturn(client->id, secret, packet->path, packet->path_len,
                                                       PAYLOAD_TYPE_RESPONSE, reply_data, reply_len);
-                if (path) sendFlood(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+                if (path) sendFloodReply(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
             } else {
                 mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, client->id, secret, reply_data, reply_len);
                 if (reply) {
                     if (client->out_path_len != OUT_PATH_UNKNOWN) {
                         sendDirect(reply, client->out_path, client->out_path_len, SERVER_RESPONSE_DELAY);
                     } else {
-                        sendFlood(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+                        sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
                     }
                 }
             }
@@ -691,7 +715,7 @@ void RepeaterMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
                 mesh::Packet* ack = createAck(ack_hash);
                 if (ack) {
                     if (client->out_path_len == OUT_PATH_UNKNOWN) {
-                        sendFlood(ack, TXT_ACK_DELAY, packet->getPathHashSize());
+                        sendFloodReply(ack, TXT_ACK_DELAY, packet->getPathHashSize());
                     } else {
                         sendDirect(ack, client->out_path, client->out_path_len, TXT_ACK_DELAY);
                     }
@@ -717,7 +741,7 @@ void RepeaterMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
                 auto reply_pkt = createDatagram(PAYLOAD_TYPE_TXT_MSG, client->id, secret, temp, 5 + text_len);
                 if (reply_pkt) {
                     if (client->out_path_len == OUT_PATH_UNKNOWN) {
-                        sendFlood(reply_pkt, CLI_REPLY_DELAY_MILLIS, packet->getPathHashSize());
+                        sendFloodReply(reply_pkt, CLI_REPLY_DELAY_MILLIS, packet->getPathHashSize());
                     } else {
                         sendDirect(reply_pkt, client->out_path, client->out_path_len, CLI_REPLY_DELAY_MILLIS);
                     }
@@ -823,6 +847,7 @@ RepeaterMesh::RepeaterMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::Mil
     _logging = false;
     region_load_active = false;
     recv_pkt_region = nullptr;
+    memset(default_scope.key, 0, sizeof(default_scope.key));
     pending_discover_tag = 0;
     pending_discover_until = 0;
 
@@ -868,6 +893,14 @@ void RepeaterMesh::begin(RepeaterDataStore* store) {
 #endif
     acl.load(_store->getAclPath(), self_id);
     region_map.load(_store->getRegionsPath());
+
+    // establish default-scope from persisted default region (if any)
+    {
+        RegionEntry* r = region_map.getDefaultRegion();
+        if (r) {
+            region_map.getTransportKeysFor(*r, &default_scope, 1);
+        }
+    }
 
     /* NOTE: Radio configuration is handled by SX126xRadio adapter using
      * LoRaConfig defaults. The repeater uses the same radio params as companion.
@@ -994,7 +1027,7 @@ void RepeaterMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
     mesh::Packet* pkt = createSelfAdvert();
     if (pkt) {
         if (flood) {
-            sendFlood(pkt, delay_millis, _prefs.path_hash_mode + 1);
+            sendFloodScoped(default_scope, pkt, delay_millis, _prefs.path_hash_mode + 1);
         } else {
             sendZeroHop(pkt, delay_millis);
         }
@@ -1264,6 +1297,30 @@ void RepeaterMesh::handleCommand(uint32_t sender_timestamp, char* command, char*
         } else if (n == 2 && strcmp(parts[1], "home") == 0) {
             auto home = region_map.getHomeRegion();
             sprintf(reply, " home is %s", home ? home->name : "*");
+        } else if (n >= 3 && strcmp(parts[1], "default") == 0) {
+            if (strcmp(parts[2], "<null>") == 0) {
+                region_map.setDefaultRegion(nullptr);
+                memset(default_scope.key, 0, sizeof(default_scope.key));
+                region_map.save(_store->getRegionsPath());  // persist in one atomic step
+                sprintf(reply, " default scope is now <null>");
+            } else {
+                auto def = region_map.findByNamePrefix(parts[2]);
+                if (def == nullptr) {
+                    def = region_map.putRegion(parts[2], 0);  // auto-create the default region
+                }
+                if (def) {
+                    def->flags = 0;   // make sure allow flood enabled
+                    region_map.setDefaultRegion(def);
+                    region_map.getTransportKeysFor(*def, &default_scope, 1);
+                    region_map.save(_store->getRegionsPath());  // persist in one atomic step
+                    sprintf(reply, " default scope is now %s", def->name);
+                } else {
+                    strcpy(reply, "Err - region table full");
+                }
+            }
+        } else if (n == 2 && strcmp(parts[1], "default") == 0) {
+            auto def = region_map.getDefaultRegion();
+            sprintf(reply, " default scope is %s", def ? def->name : "<null>");
         } else if (n >= 3 && strcmp(parts[1], "put") == 0) {
             auto parent = n >= 4 ? region_map.findByNamePrefix(parts[3]) : &region_map.getWildcard();
             if (parent == nullptr) {
@@ -1273,7 +1330,8 @@ void RepeaterMesh::handleCommand(uint32_t sender_timestamp, char* command, char*
                 if (region == nullptr) {
                     strcpy(reply, "Err - unable to put");
                 } else {
-                    strcpy(reply, "OK");
+                    region->flags = 0;   // New default: enable flood
+                    strcpy(reply, "OK - (flood allowed)");
                 }
             }
         } else if (n >= 3 && strcmp(parts[1], "remove") == 0) {
@@ -1561,7 +1619,7 @@ void RepeaterMesh::loop() {
 
     if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
         mesh::Packet* pkt = createSelfAdvert();
-        if (pkt) sendFlood(pkt, (uint32_t)0, _prefs.path_hash_mode + 1);
+        if (pkt) sendFloodScoped(default_scope, pkt, (uint32_t)0, _prefs.path_hash_mode + 1);
         updateFloodAdvertTimer();
         updateAdvertTimer();
     } else if (next_local_advert && millisHasNowPassed(next_local_advert)) {

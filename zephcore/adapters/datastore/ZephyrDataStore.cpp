@@ -456,6 +456,22 @@ void ZephyrDataStore::loadPrefs(NodePrefs &prefs)
 			prefs.apc_margin = 20;  /* companion default */
 		}
 	}
+
+	/* Offset 96: default_scope_name (31 bytes) — v11 FIRMWARE_VER_CODE */
+	if (off + 31 <= len) {
+		memcpy(prefs.default_scope_name, &buf[off], 31);
+		off += 31;
+	} else {
+		memset(prefs.default_scope_name, 0, sizeof(prefs.default_scope_name));
+	}
+
+	/* Offset 127: default_scope_key (16 bytes) */
+	if (off + 16 <= len) {
+		memcpy(prefs.default_scope_key, &buf[off], 16);
+		off += 16;
+	} else {
+		memset(prefs.default_scope_key, 0, sizeof(prefs.default_scope_key));
+	}
 }
 
 void ZephyrDataStore::savePrefs(const NodePrefs &prefs)
@@ -510,7 +526,13 @@ void ZephyrDataStore::savePrefs(const NodePrefs &prefs)
 	buf[off++] = prefs.apc_enabled;
 	/* Offset 95: apc_margin (ZephCore extension) */
 	buf[off++] = prefs.apc_margin;
-	/* Total: 96 bytes (Arduino reads 92, ZephCore reads 96) */
+	/* Offset 96: default_scope_name (31 bytes) — v11 FIRMWARE_VER_CODE */
+	memcpy(&buf[off], prefs.default_scope_name, 31);
+	off += 31;
+	/* Offset 127: default_scope_key (16 bytes) */
+	memcpy(&buf[off], prefs.default_scope_key, 16);
+	off += 16;
+	/* Total: 143 bytes */
 
 	bool ok = atomicReplaceFile(PREFS_FILE, buf, off);
 	LOG_DBG("savePrefs: wrote %s, ok=%d (%d bytes), name='%.16s'",
@@ -780,8 +802,10 @@ bool ZephyrDataStore::deleteBlobByKey(const uint8_t key[], int key_len)
 
 uint32_t ZephyrDataStore::getStorageUsedKb() const
 {
+	/* Match Arduino DataStore: stats follow contacts/channels mount (/ext if present). */
+	const char *mp = _has_ext_fs ? EXT_MNT_POINT : MNT_POINT;
 	struct fs_statvfs sbuf;
-	if (fs_statvfs(MNT_POINT, &sbuf) != 0) {
+	if (fs_statvfs(mp, &sbuf) != 0) {
 		return 0;
 	}
 	uint32_t total = sbuf.f_blocks * sbuf.f_frsize;
@@ -791,8 +815,9 @@ uint32_t ZephyrDataStore::getStorageUsedKb() const
 
 uint32_t ZephyrDataStore::getStorageTotalKb() const
 {
+	const char *mp = _has_ext_fs ? EXT_MNT_POINT : MNT_POINT;
 	struct fs_statvfs sbuf;
-	if (fs_statvfs(MNT_POINT, &sbuf) != 0) {
+	if (fs_statvfs(mp, &sbuf) != 0) {
 		return 0;
 	}
 	return (sbuf.f_blocks * sbuf.f_frsize) / 1024;

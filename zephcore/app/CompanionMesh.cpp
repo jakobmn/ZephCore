@@ -69,7 +69,7 @@ LOG_MODULE_REGISTER(zephcore_companion, CONFIG_ZEPHCORE_MAIN_LOG_LEVEL);
 #define CMD_SEND_BINARY_REQ      0x32
 #define CMD_FACTORY_RESET        0x33
 #define CMD_SEND_PATH_DISCOVERY  0x34
-#define CMD_SET_FLOOD_SCOPE      0x36
+#define CMD_SET_FLOOD_SCOPE_KEY  0x36  /* v8+ (renamed from CMD_SET_FLOOD_SCOPE) */
 #define CMD_SEND_CONTROL_DATA    0x37
 #define CMD_GET_STATS            0x38
 #define CMD_SEND_ANON_REQ        0x39
@@ -78,6 +78,8 @@ LOG_MODULE_REGISTER(zephcore_companion, CONFIG_ZEPHCORE_MAIN_LOG_LEVEL);
 #define CMD_GET_ALLOWED_REPEAT_FREQ 0x3C
 #define CMD_SET_PATH_HASH_MODE      0x3D
 #define CMD_SEND_CHANNEL_DATA       0x3E
+#define CMD_SET_DEFAULT_FLOOD_SCOPE 0x3F  /* v11+ */
+#define CMD_GET_DEFAULT_FLOOD_SCOPE 0x40  /* v11+ */
 
 /* Response packet types */
 #define PACKET_OK               0x00
@@ -108,6 +110,7 @@ LOG_MODULE_REGISTER(zephcore_companion, CONFIG_ZEPHCORE_MAIN_LOG_LEVEL);
 #define PACKET_AUTOADD_CONFIG   0x19
 #define PACKET_ALLOWED_REPEAT_FREQ 0x1A
 #define PACKET_CHANNEL_DATA_RECV   0x1B
+#define PACKET_DEFAULT_FLOOD_SCOPE 0x1C
 
 #define MAX_CHANNEL_DATA_LENGTH    (MAX_FRAME_SIZE - 9)
 
@@ -204,28 +207,36 @@ bool CompanionMesh::allowPacketForward(const mesh::Packet *packet)
 	return prefs.client_repeat != 0;
 }
 
-void CompanionMesh::sendFloodScoped(const ContactInfo &recipient, mesh::Packet *pkt, uint32_t delay_millis)
+void CompanionMesh::sendFloodScoped(const TransportKey &scope, mesh::Packet *pkt, uint32_t delay_millis)
 {
-	if (_send_scope.isNull()) {
+	if (scope.isNull()) {
 		sendFlood(pkt, delay_millis, prefs.path_hash_mode + 1);
 	} else {
 		uint16_t codes[2];
-		codes[0] = _send_scope.calcTransportCode(pkt);
+		codes[0] = scope.calcTransportCode(pkt);
 		codes[1] = 0;
 		sendFlood(pkt, codes, delay_millis, prefs.path_hash_mode + 1);
 	}
 }
 
+void CompanionMesh::sendFloodScoped(const ContactInfo &recipient, mesh::Packet *pkt, uint32_t delay_millis)
+{
+	/* TODO: dynamic _send_scope, depending on recipient and current 'home' Region */
+	TransportKey default_scope;
+	memcpy(default_scope.key, prefs.default_scope_key, sizeof(default_scope.key));
+
+	const TransportKey &scope = _send_scope.isNull() ? default_scope : _send_scope;
+	sendFloodScoped(scope, pkt, delay_millis);
+}
+
 void CompanionMesh::sendFloodScoped(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t delay_millis)
 {
-	if (_send_scope.isNull()) {
-		sendFlood(pkt, delay_millis, prefs.path_hash_mode + 1);
-	} else {
-		uint16_t codes[2];
-		codes[0] = _send_scope.calcTransportCode(pkt);
-		codes[1] = 0;
-		sendFlood(pkt, codes, delay_millis, prefs.path_hash_mode + 1);
-	}
+	/* TODO: have per-channel send_scope */
+	TransportKey default_scope;
+	memcpy(default_scope.key, prefs.default_scope_key, sizeof(default_scope.key));
+
+	const TransportKey &scope = _send_scope.isNull() ? default_scope : _send_scope;
+	sendFloodScoped(scope, pkt, delay_millis);
 }
 
 bool CompanionMesh::onContactPathRecv(ContactInfo &from, uint8_t *in_path, uint8_t in_path_len,
@@ -1780,7 +1791,9 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 		if (adv) {
 			/* Optional param: data[1] == 1 means flood, else zero-hop */
 			if (len >= 2 && data[1] == 1) {
-				sendFlood(adv, (uint32_t)0, prefs.path_hash_mode + 1);
+				TransportKey default_scope;
+				memcpy(default_scope.key, prefs.default_scope_key, sizeof(default_scope.key));
+				sendFloodScoped(default_scope, adv, (uint32_t)0);
 			} else {
 				sendZeroHop(adv);
 			}
@@ -1952,7 +1965,7 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 			static const uint8_t version[20] = "v1.14.1-zephyr";
 			uint8_t rsp[82];
 			rsp[0] = PACKET_DEVICE_INFO;
-			rsp[1] = 10;  // FIRMWARE_VER_CODE - v10 = path_hash_mode support
+			rsp[1] = 11;  // FIRMWARE_VER_CODE - v11 = CMD_SET/GET_DEFAULT_FLOOD_SCOPE
 			rsp[2] = (MAX_CONTACTS / 2 > 255) ? 255 : (MAX_CONTACTS / 2);  // protocol byte, app multiplies by 2
 			rsp[3] = MAX_GROUP_CHANNELS;
 			put_le32(&rsp[4], prefs.ble_pin ? prefs.ble_pin : 123456);  // BLE PIN
@@ -2604,8 +2617,8 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 		}
 		return true;
 
-	case CMD_SET_FLOOD_SCOPE:
-		/* Flood scope: [cmd][0][16-byte key] or [cmd][0] (null key) */
+	case CMD_SET_FLOOD_SCOPE_KEY:
+		/* Set current send_scope key: [cmd][0][16-byte key] or [cmd][0] (null key) */
 		if (len >= 2 && data[1] == 0) {
 			if (len >= 2 + 16) {
 				memcpy(_send_scope.key, &data[2], sizeof(_send_scope.key));
@@ -2617,6 +2630,40 @@ bool CompanionMesh::handleProtocolFrame(const uint8_t *data, size_t len)
 			sendPacketError(ERR_ILLEGAL_ARG);
 		}
 		return true;
+
+	case CMD_SET_DEFAULT_FLOOD_SCOPE:
+		/* Set default flood scope: [cmd][name:31][key:16] or [cmd] alone (clear) */
+		if (len >= 1 + 31 + 16) {
+			int n = strnlen((const char *)&data[1], 31);
+			if (n > 0 && n < 31) {
+				memset(prefs.default_scope_name, 0, sizeof(prefs.default_scope_name));
+				memcpy(prefs.default_scope_name, &data[1], n);
+				memcpy(prefs.default_scope_key, &data[1 + 31], 16);
+				_store->savePrefs(prefs);
+				sendPacketOk();
+			} else {
+				sendPacketError(ERR_ILLEGAL_ARG);
+			}
+		} else {
+			memset(prefs.default_scope_name, 0, sizeof(prefs.default_scope_name));
+			memset(prefs.default_scope_key, 0, sizeof(prefs.default_scope_key));
+			_store->savePrefs(prefs);
+			sendPacketOk();
+		}
+		return true;
+
+	case CMD_GET_DEFAULT_FLOOD_SCOPE: {
+		uint8_t rsp[1 + 31 + 16];
+		rsp[0] = PACKET_DEFAULT_FLOOD_SCOPE;
+		if (strlen(prefs.default_scope_name) > 0) {
+			memcpy(&rsp[1], prefs.default_scope_name, 31);
+			memcpy(&rsp[1 + 31], prefs.default_scope_key, 16);
+			writeFrame(rsp, sizeof(rsp));
+		} else {
+			writeFrame(rsp, 1);  /* no name or key means null */
+		}
+		return true;
+	}
 
 	case CMD_SEND_CONTROL_DATA:
 		/* Control data: [cmd][flags | 0x80][data...] */

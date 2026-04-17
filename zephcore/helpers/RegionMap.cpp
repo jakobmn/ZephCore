@@ -19,7 +19,7 @@ static const char* skip_hash(const char* name) {
 RegionMap::RegionMap(TransportKeyStore& store) : _store(&store) {
     next_id = 1;
     num_regions = 0;
-    home_id = 0;
+    default_id = home_id = 0;
     wildcard.id = 0;
     wildcard.parent = 0;
     wildcard.flags = 0;  // default behaviour, allow flood and direct
@@ -45,9 +45,10 @@ bool RegionMap::load(const char* path) {
     uint8_t pad[128];
     num_regions = 0;
     next_id = 1;
-    home_id = 0;
+    default_id = home_id = 0;
 
-    bool success = fs_read(&file, pad, 5) == 5;  // reserved header
+    bool success = fs_read(&file, pad, 3) == 3;  // reserved header
+    success = success && fs_read(&file, &default_id, sizeof(default_id)) == sizeof(default_id);
     success = success && fs_read(&file, &home_id, sizeof(home_id)) == sizeof(home_id);
     success = success && fs_read(&file, &wildcard.flags, sizeof(wildcard.flags)) == sizeof(wildcard.flags);
     success = success && fs_read(&file, &next_id, sizeof(next_id)) == sizeof(next_id);
@@ -92,7 +93,8 @@ bool RegionMap::save(const char* path) {
     uint8_t pad[128];
     memset(pad, 0, sizeof(pad));
 
-    bool success = fs_write(&file, pad, 5) == 5;  // reserved header
+    bool success = fs_write(&file, pad, 3) == 3;  // reserved header
+    success = success && fs_write(&file, &default_id, sizeof(default_id)) == sizeof(default_id);
     success = success && fs_write(&file, &home_id, sizeof(home_id)) == sizeof(home_id);
     success = success && fs_write(&file, &wildcard.flags, sizeof(wildcard.flags)) == sizeof(wildcard.flags);
     success = success && fs_write(&file, &next_id, sizeof(next_id)) == sizeof(next_id);
@@ -138,25 +140,30 @@ RegionEntry* RegionMap::putRegion(const char* name, uint16_t parent_id, uint16_t
     return region;
 }
 
+int RegionMap::getTransportKeysFor(const RegionEntry& src, TransportKey dest[], int max_num) {
+    int num;
+    if (src.name[0] == '$') {  // private region
+        num = _store->loadKeysFor(src.id, dest, max_num);
+    } else if (src.name[0] == '#') {  // auto hashtag region
+        _store->getAutoKeyFor(src.id, src.name, dest[0]);
+        num = 1;
+    } else {  // new: implicit auto hashtag region
+        char tmp[sizeof(src.name) + 1];
+        tmp[0] = '#';
+        memcpy(&tmp[1], src.name, sizeof(src.name) - 1);
+        tmp[sizeof(src.name)] = '\0';
+        _store->getAutoKeyFor(src.id, tmp, dest[0]);
+        num = 1;
+    }
+    return num;
+}
+
 RegionEntry* RegionMap::findMatch(mesh::Packet* packet, uint8_t mask) {
     for (int i = 0; i < num_regions; i++) {
         auto region = &regions[i];
         if ((region->flags & mask) == 0) {  // does region allow this? (per 'mask' param)
             TransportKey keys[4];
-            int num;
-            if (region->name[0] == '$') {  // private region
-                num = _store->loadKeysFor(region->id, keys, 4);
-            } else if (region->name[0] == '#') {  // auto hashtag region
-                _store->getAutoKeyFor(region->id, region->name, keys[0]);
-                num = 1;
-            } else {  // new: implicit auto hashtag region
-                char tmp[sizeof(region->name) + 1];
-                tmp[0] = '#';
-                memcpy(&tmp[1], region->name, sizeof(region->name) - 1);
-                tmp[sizeof(region->name)] = '\0';
-                _store->getAutoKeyFor(region->id, tmp, keys[0]);
-                num = 1;
-            }
+            int num = getTransportKeysFor(*region, keys, 4);
             for (int j = 0; j < num; j++) {
                 uint16_t code = keys[j].calcTransportCode(packet);
                 if (packet->transport_codes[0] == code) {  // a match!!
@@ -210,6 +217,14 @@ RegionEntry* RegionMap::getHomeRegion() {
 
 void RegionMap::setHomeRegion(const RegionEntry* home) {
     home_id = home ? home->id : 0;
+}
+
+RegionEntry* RegionMap::getDefaultRegion() {
+    return default_id == 0 ? nullptr : findById(default_id);
+}
+
+void RegionMap::setDefaultRegion(const RegionEntry* def) {
+    default_id = def ? def->id : 0;
 }
 
 bool RegionMap::removeRegion(const RegionEntry& region) {

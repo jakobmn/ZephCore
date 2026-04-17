@@ -72,10 +72,11 @@ Regions control which flood packets the repeater forwards. The region tree is hi
 | `region` | Export the current region map (indented text tree) |
 | `region load` | Enter interactive region load mode. Paste indented region lines; send a blank line to commit |
 | `region save` | Save the current region map to persistent storage |
-| `region put <name> [<parent>]` | Create a region; default parent is the wildcard root |
+| `region put <name> [<parent>]` | Create a region; default parent is the wildcard root. Flood is **allowed** by default (use `region denyf` to deny) |
 | `region remove <name>` | Remove a region (must have no children) |
 | `region get <name>` | Show a region's parent and flood-allow flag |
 | `region home [<name>]` | Get (no arg) or set the home region |
+| `region default [<name>\|<null>]` | Get (no arg), set, or clear (`<null>`) the default flood scope. Originated floods (self-adverts, etc.) are scoped with this region's TransportKey. Auto-creates the region if it doesn't exist and persists immediately |
 | `region allowf <name>` | Allow flood packets in a region (clears deny-flood flag) |
 | `region denyf <name>` | Deny flood packets in a region (sets deny-flood flag) |
 | `region list allowed` | List all regions that allow floods |

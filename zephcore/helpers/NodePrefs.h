@@ -76,6 +76,8 @@ struct NodePrefs {
 	uint8_t autoadd_max_hops;       // 0 = no limit, N = up to N-1 hops
 	uint8_t loop_detect;            // LOOP_DETECT_{OFF,MINIMAL,MODERATE,STRICT}
 	uint8_t leds_disabled;          // 1 = LEDs off
+	char default_scope_name[31];    // companion: default flood scope region name ("" = null)
+	uint8_t default_scope_key[16];  // companion: default flood scope TransportKey
 };
 
 /* Default prefs -- must match LoRaConfig.h defaults for radio interop. */
