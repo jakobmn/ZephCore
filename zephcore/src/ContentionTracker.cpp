@@ -108,10 +108,13 @@ uint16_t ContentionTracker::getReactiveHeadroom(uint32_t hash32, uint32_t airtim
 	uint32_t per_dupe = (uint32_t)(_backoff_multiplier * (float)airtime_ms);
 	if (per_dupe == 0) return 0;
 
-	/* Hard cap: REACTIVE_HARD_CAP_MS total extension per packet */
-	if (_ring[idx].reactive_added_ms >= REACTIVE_HARD_CAP_MS) return 0;
+	/* Effective cap: ~12 relay-slots (airtime-scaled), absolute ceiling REACTIVE_HARD_CAP_MS */
+	uint32_t effective_cap = 12 * airtime_ms;
+	if (effective_cap > REACTIVE_HARD_CAP_MS) effective_cap = REACTIVE_HARD_CAP_MS;
 
-	uint32_t remaining = REACTIVE_HARD_CAP_MS - _ring[idx].reactive_added_ms;
+	if (_ring[idx].reactive_added_ms >= effective_cap) return 0;
+
+	uint32_t remaining = effective_cap - _ring[idx].reactive_added_ms;
 	if (per_dupe > remaining) per_dupe = remaining;
 	return per_dupe > 0xFFFF ? 0xFFFF : (uint16_t)per_dupe;
 }

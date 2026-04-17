@@ -1173,10 +1173,13 @@ void CompanionMesh::onRawDataRecv(mesh::Packet *packet)
 uint32_t CompanionMesh::getRetransmitDelay(const mesh::Packet *packet)
 {
 	float factor = getContentionTracker().getFloodDelayFactor();
-	uint32_t t = (uint32_t)(_radio->getEstAirtimeFor(
-		packet->getPathByteLen() + packet->payload_len + 2) * factor);
-	uint32_t max_jitter = 5 * t;
-	/* Cap jitter to 2000ms to avoid excessive latency in very dense areas.
+	uint32_t airtime = _radio->getEstAirtimeFor(
+		packet->getPathByteLen() + packet->payload_len + 2);
+	uint32_t max_jitter = (uint32_t)(5 * airtime * factor);
+	/* Airtime-scaled ceiling: never exceed ~6 airtimes of spread. */
+	uint32_t airtime_cap = 6 * airtime;
+	if (max_jitter > airtime_cap) max_jitter = airtime_cap;
+	/* Absolute cap: avoid excessive latency in very dense areas.
 	 * Reactive backoff will fine-tune further if needed. */
 	if (max_jitter > 2000) max_jitter = 2000;
 	/* Floor: give downstream nodes time to finish RX processing
@@ -1191,6 +1194,21 @@ uint32_t CompanionMesh::getDirectRetransmitDelay(const mesh::Packet *packet)
 	/* Floor: give downstream nodes time to finish RX processing
 	 * and return to RX mode before we TX (~20ms settle + jitter) */
 	return 20 + getRNG()->nextInt(0, t / 10 + 1);
+}
+
+uint32_t CompanionMesh::getInitialFloodJitter(const mesh::Packet *packet)
+{
+	float factor = getContentionTracker().getFloodDelayFactor();
+	uint32_t airtime = _radio->getEstAirtimeFor(
+		packet->getPathByteLen() + packet->payload_len + 2);
+	uint32_t max_jitter = (uint32_t)(5 * airtime * factor);
+	/* Companion spreads less aggressively than a repeater: half the
+	 * airtime ceiling, and a tighter absolute cap (1000ms vs 2000ms). */
+	uint32_t airtime_cap = 3 * airtime;
+	if (max_jitter > airtime_cap) max_jitter = airtime_cap;
+	if (max_jitter > 1000) max_jitter = 1000;
+	if (max_jitter == 0) return 0;
+	return getRNG()->nextInt(0, max_jitter + 1);
 }
 
 uint8_t CompanionMesh::getDutyCyclePercent() const

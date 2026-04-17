@@ -261,6 +261,13 @@ protected:
 	/* Dispatcher tuning (uses prefs) */
 	uint32_t getRetransmitDelay(const mesh::Packet *packet) override;
 	uint32_t getDirectRetransmitDelay(const mesh::Packet *packet) override;
+
+	/* Companion doesn't forward, but needs surroundings awareness so its
+	 * initial TX spreads with local contention.  Enables passive EMA
+	 * warming and adaptive initial-flood jitter. */
+	bool passivelyTrackFloods() const override { return true; }
+	uint32_t getInitialFloodJitter(const mesh::Packet *packet) override;
+
 	uint8_t getDutyCyclePercent() const override;
 	uint8_t getExtraAckTransmitCount() const override;
 

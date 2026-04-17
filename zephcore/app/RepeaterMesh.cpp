@@ -522,10 +522,14 @@ void RepeaterMesh::logTxFail(mesh::Packet* pkt, int len) {
 
 uint32_t RepeaterMesh::getRetransmitDelay(const mesh::Packet* packet) {
     float factor = getContentionTracker().getFloodDelayFactor();
-    uint32_t t = (uint32_t)(_radio->getEstAirtimeFor(
-        packet->getPathByteLen() + packet->payload_len + 2) * factor);
-    uint32_t max_jitter = 5 * t;
-    /* Cap jitter to 2000ms to avoid excessive latency in very dense areas.
+    uint32_t airtime = _radio->getEstAirtimeFor(
+        packet->getPathByteLen() + packet->payload_len + 2);
+    uint32_t max_jitter = (uint32_t)(5 * airtime * factor);
+    /* Airtime-scaled ceiling: never exceed ~6 airtimes of spread
+     * (keeps SF7/narrow-BW configs from wasting time in oversized jitter windows). */
+    uint32_t airtime_cap = 6 * airtime;
+    if (max_jitter > airtime_cap) max_jitter = airtime_cap;
+    /* Absolute cap: avoid excessive latency in very dense areas.
      * Reactive backoff will fine-tune further if needed. */
     if (max_jitter > 2000) max_jitter = 2000;
     /* Floor: give downstream nodes time to finish RX processing

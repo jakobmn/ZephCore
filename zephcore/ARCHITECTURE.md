@@ -236,21 +236,29 @@ Called every ~5 seconds from the main event loop:
 
 ### 4.7 Adaptive Contention Window
 
-Replaces Arduino MeshCore's static `txdelay`/`rxdelay` with two complementary mechanisms:
+Replaces Arduino MeshCore's static `txdelay`/`rxdelay` with three complementary mechanisms.
 
 **EMA Delay Factor (proactive)**
 
-`ContentionTracker` measures observed duplicates per retransmitted packet using a 16-entry ring buffer. Each entry tracks a packet (identified by FNV-1a hash) and records how many dupes arrive within a 10-second observation window. When the window closes, the entry is finalized and an EMA is updated with alpha = 1/8. The resulting estimate feeds the delay factor formula:
+`ContentionTracker` measures observed duplicates per retransmitted packet using a **24-entry ring buffer** (sized for ~50-neighbor hilltop topologies with multiple concurrent in-flight floods). Each entry tracks a packet (identified by FNV-1a hash) and records how many dupes arrive within a 10-second observation window. When the window closes, the entry is finalized and an EMA is updated with alpha = 1/8. The resulting estimate feeds the delay factor formula:
 
 ```
-factor = 0.05 + 0.116 * sqrt(est)
+factor = 0.05 + 0.170 * sqrt(est)
 ```
 
-Capped at 2.0. During warmup (fewer than 4 finalized entries), factor defaults to 0.5. Sparse nodes converge toward near-zero delay; dense nodes get proportionally higher delay. The factor scales the flood TX delay computed by `calcRxDelay()`.
+Capped at 2.0. During warmup (fewer than 4 finalized entries), factor defaults to 0.5. Sparse nodes converge toward near-zero delay; dense nodes get proportionally higher delay.
+
+The flood retransmit jitter window is `5·airtime·factor` clamped by **two ceilings**:
+- Airtime-scaled: `6·airtime` — keeps SF7/narrow-BW configs from wasting time in oversized windows.
+- Absolute: `2000ms` — bounds per-hop latency in dense areas even when airtime is large.
 
 **Per-Dupe Reactive Backoff**
 
-When a duplicate of a pending outbound packet is heard, TX is rescheduled to `now + backoff_multiplier * airtime`. Each dupe triggers a full delay (not diminishing). Cumulative reactive extension is hard-capped at 2000 ms per packet; after the cap, CAD handles remaining channel activity. `backoff_multiplier` is configurable via `set backoff.multiplier X` (range 0.0–2.0).
+When a duplicate of a pending outbound packet is heard, TX is rescheduled to `now + backoff_multiplier * airtime`. Each dupe triggers a full delay (not diminishing). Cumulative reactive extension is capped at `min(2000ms, 12·airtime)` per packet; after the cap, CAD handles remaining channel activity. `backoff_multiplier` is configurable via `set backoff.multiplier X` (range 0.0–2.0).
+
+**Initial-Flood Jitter (companion-only)**
+
+Companions don't retransmit floods, but they observe mesh contention and need to spread their *originated* transmissions to avoid colliding with repeaters still busy in TX/RX. `Mesh::passivelyTrackFloods()` (overridden to `true` on `CompanionMesh`) registers every first-hearing of a flood with the ContentionTracker, so the EMA warms up even without forwarding. `Mesh::getInitialFloodJitter(packet)` is added to the caller-supplied delay in both `sendFlood` overloads; on companion this is `rand(0, min(1000ms, 3·airtime, 5·airtime·factor))` — half the repeater's ceilings. Repeaters keep the default 0 (no double-jitter on forwards).
 
 **Direct Packets**
 
@@ -264,7 +272,7 @@ Direct (source-routed) packets bypass adaptive scaling entirely. They use minima
 
 **ContentionTracker Resource Usage**
 
-~172 bytes RAM. 16-entry ring buffer, FNV-1a packet hash, 10-second observation window, EMA with alpha = 1/8.
+~260 bytes RAM (24-entry ring buffer × ~16B/entry + state). FNV-1a packet hash, 10-second observation window, EMA with alpha = 1/8.
 
 ### 4.8 Encryption
 

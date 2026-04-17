@@ -216,6 +216,10 @@ DispatcherAction Mesh::onRecvPacket(Packet *pkt)
 #endif
 		if (_contention.recordDupeIfTracked(h, (uint32_t)_ms->getMillis())) {
 			extendPendingRetransmit(h);
+		} else if (passivelyTrackFloods()) {
+			/* First hearing of a flood we won't forward — track it so the
+			 * EMA reflects local contention (companion-side awareness). */
+			_contention.trackRetransmit(h, (uint32_t)_ms->getMillis());
 		}
 	}
 
@@ -485,7 +489,7 @@ void Mesh::sendFlood(Packet *packet, uint32_t delay_millis, uint8_t path_hash_si
 	} else {
 		pri = 1;
 	}
-	sendPacket(packet, pri, delay_millis);
+	sendPacket(packet, pri, delay_millis + getInitialFloodJitter(packet));
 }
 
 void Mesh::sendFlood(Packet *packet, uint16_t *transport_codes, uint32_t delay_millis, uint8_t path_hash_size)
@@ -520,7 +524,7 @@ void Mesh::sendFlood(Packet *packet, uint16_t *transport_codes, uint32_t delay_m
 	} else {
 		pri = 1;
 	}
-	sendPacket(packet, pri, delay_millis);
+	sendPacket(packet, pri, delay_millis + getInitialFloodJitter(packet));
 }
 
 void Mesh::sendDirect(Packet *packet, const uint8_t *path, uint8_t path_len, uint32_t delay_millis)

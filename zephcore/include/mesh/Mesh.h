@@ -52,6 +52,12 @@ protected:
 	virtual bool allowPacketForward(const Packet *packet);
 	virtual uint32_t getRetransmitDelay(const Packet *packet);
 	virtual uint32_t getDirectRetransmitDelay(const Packet *packet) { return 0; }
+	/* Passive contention tracking: if true, track heard floods we don't forward
+	 * (warms the contention EMA on nodes that don't relay, e.g. companions). */
+	virtual bool passivelyTrackFloods() const { return false; }
+	/* Added to caller-supplied delay on every sendFlood.  Default 0 (repeater
+	 * behavior).  Companion overrides to spread its initial TX adaptively. */
+	virtual uint32_t getInitialFloodJitter(const Packet *packet) { (void)packet; return 0; }
 	virtual uint8_t getExtraAckTransmitCount() const { return 0; }
 	virtual int searchPeersByHash(const uint8_t *hash) { (void)hash; return 0; }
 	virtual void getPeerSharedSecret(uint8_t *dest_secret, int peer_idx) { (void)dest_secret; (void)peer_idx; }
