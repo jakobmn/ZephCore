@@ -52,6 +52,10 @@ public:
     virtual float getFloodDelayFactor() const { return 0.5f; }
     virtual void setBackoffMultiplier(float m) { (void)m; }
 
+    // Duty-cycle preamble false-positive counter (SX126x only)
+    virtual uint32_t getDutyCycleTimeoutRestarts() const { return 0; }
+    virtual void resetDutyCycleTimeoutRestarts() {}
+
     // Adaptive Power Control
     virtual int8_t getAPCReduction() const { return 0; }
     virtual float getAPCMargin() const { return 0.0f; }

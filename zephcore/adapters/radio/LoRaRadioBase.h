@@ -71,6 +71,16 @@ public:
 	void setRxBoost(bool enable);
 	bool isRxBoostEnabled() const { return _rx_boost_enabled; }
 
+	/* Duty-cycle preamble false-positive counter.
+	 * Incremented by the driver whenever RX_TX_TIMEOUT fires in
+	 * duty-cycle mode and the chip is silently re-armed.  High
+	 * values indicate a noisy RF environment or too-loose preamble
+	 * detection — each event extends real RX time past the nominal
+	 * duty cycle, inflating current draw.
+	 * Default returns 0 on radios that don't support the stat. */
+	virtual uint32_t getDutyCycleTimeoutRestarts() const { return 0; }
+	virtual void resetDutyCycleTimeoutRestarts() {}
+
 	/* Adaptive Power Control */
 	void setTxPowerReduction(int8_t reduction_db) override { _tx_power_reduction_db = reduction_db; }
 	int8_t getTxPowerReduction() const override { return _tx_power_reduction_db; }

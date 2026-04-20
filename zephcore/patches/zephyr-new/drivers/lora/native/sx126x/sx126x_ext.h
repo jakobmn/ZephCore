@@ -88,6 +88,27 @@ void sx126x_apply_heltec_reg_patch(const struct device *dev);
  */
 void sx126x_reset_agc(const struct device *dev);
 
+/**
+ * @brief Get duty-cycle preamble false-positive counter
+ *
+ * Returns the number of times duty-cycle RX tripped IRQ_RX_TX_TIMEOUT
+ * and was silently re-armed. High values mean the preamble detector is
+ * firing on noise/neighbour interference without a real packet arriving,
+ * which inflates RX-on time beyond the nominal duty cycle and shortens
+ * battery life.
+ *
+ * @param dev LoRa device
+ * @return Cumulative re-arm count since last reset
+ */
+uint32_t sx126x_get_dc_timeout_restarts(const struct device *dev);
+
+/**
+ * @brief Reset the duty-cycle preamble false-positive counter to zero.
+ *
+ * @param dev LoRa device
+ */
+void sx126x_reset_dc_timeout_restarts(const struct device *dev);
+
 #ifdef __cplusplus
 }
 #endif

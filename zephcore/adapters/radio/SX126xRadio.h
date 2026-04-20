@@ -16,6 +16,10 @@ public:
 
 	void begin() override;
 
+	/* Duty-cycle preamble false-positive stats (SX126x-specific) */
+	uint32_t getDutyCycleTimeoutRestarts() const override;
+	void resetDutyCycleTimeoutRestarts() override;
+
 protected:
 	/* Hardware primitives */
 	void hwConfigure(const struct lora_modem_config &cfg) override;

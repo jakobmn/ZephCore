@@ -234,6 +234,11 @@ public:
         getContentionTracker().setBackoffMultiplier(m);
     }
 
+    /* Duty-cycle preamble false-positive stats (SX126x only;
+     * other radios return 0 from the base class). */
+    uint32_t getDutyCycleTimeoutRestarts() const override;
+    void resetDutyCycleTimeoutRestarts() override;
+
 #ifdef CONFIG_ZEPHCORE_APC
     /* Adaptive Power Control callbacks */
     int8_t getAPCReduction() const override {

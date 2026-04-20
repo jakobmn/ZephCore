@@ -1137,8 +1137,17 @@ void RepeaterMesh::saveIdentity(const mesh::LocalIdentity& new_id) {
 void RepeaterMesh::clearStats() {
     auto& radio_driver = getRadioDriver(_radio);
     radio_driver.resetStats();
+    radio_driver.resetDutyCycleTimeoutRestarts();
     resetStats();
     ((mesh::SimpleMeshTables *)getTables())->resetStats();
+}
+
+uint32_t RepeaterMesh::getDutyCycleTimeoutRestarts() const {
+    return getRadioDriver(_radio).getDutyCycleTimeoutRestarts();
+}
+
+void RepeaterMesh::resetDutyCycleTimeoutRestarts() {
+    getRadioDriver(_radio).resetDutyCycleTimeoutRestarts();
 }
 
 void RepeaterMesh::handleCommand(uint32_t sender_timestamp, char* command, char* reply) {

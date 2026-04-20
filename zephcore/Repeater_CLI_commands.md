@@ -194,6 +194,7 @@ All `set uplink.*` changes are saved immediately and only applied after reboot.
 | `get loop.detect` | Loop detection level: `off`, `minimal`, `moderate`, or `strict` |
 | `get radio.rxgain` | RX gain boost: `0` or `1` |
 | `get rxduty` | RX duty cycle mode: `0` or `1` |
+| `get dc.restarts` | Duty-cycle preamble false-positive re-arm counter. High values mean the preamble detector is tripping on noise/interference without real packets arriving — inflates RX-on time and drains battery. Reset by `clear stats`. |
 | `get adc.multiplier` | Battery voltage ADC calibration multiplier |
 | `get bootloader.ver` | Bootloader version string |
 | `get public.key` | *(USB only)* Node's public key as hex |

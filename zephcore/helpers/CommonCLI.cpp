@@ -507,6 +507,9 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
             snprintf(reply, CLI_REPLY_SIZE, "> %d", (int)_prefs->rx_boost);
         } else if (memcmp(config, "rxduty", 6) == 0) {
             snprintf(reply, CLI_REPLY_SIZE, "> %d", (int)_prefs->rx_duty_cycle);
+        } else if (memcmp(config, "dc.restarts", 11) == 0) {
+            snprintf(reply, CLI_REPLY_SIZE, "> %u",
+                     (uint32_t)_callbacks->getDutyCycleTimeoutRestarts());
         } else {
             snprintf(reply, CLI_REPLY_SIZE, "??: %s", config);
         }
