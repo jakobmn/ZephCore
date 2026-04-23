@@ -219,6 +219,33 @@ static void gnss_data_cb(const struct device *dev, const struct gnss_data *data)
 	k_mutex_lock(&gps_mutex, K_FOREVER);
 
 	if (data->info.fix_status >= GNSS_FIX_STATUS_GNSS_FIX) {
+		/* Reject "Null Island" (0,0) fixes. Zephyr's NMEA parser splits
+		 * data across callbacks: gnss_nmea0183_parse_gga fills altitude +
+		 * fix_status but NOT lat/lon; gnss_nmea0183_parse_rmc fills
+		 * lat/lon. A merged publish fires when both GGA and RMC share a
+		 * UTC. If the chip emits GGA quality=1 while RMC is still 'V'
+		 * (or reports null-island coords), parse_rmc's early-exit on 'V'
+		 * leaves lat/lon at their previous value (zero at first boot, or
+		 * stale) while altitude advances — the caller sees valid
+		 * fix_status + altitude-only motion + (0,0) coords. Observed on
+		 * AT6558R (RAK WisMesh Tag) during early acquisition; Air530Z
+		 * (ThinkNode M1) doesn't desync GGA/RMC this way. (0,0) is never
+		 * a real fix — skip so we don't poison current_pos, persist
+		 * zeros to flash, or promote consecutive_good_fixes. */
+		if (data->nav_data.latitude == 0 && data->nav_data.longitude == 0) {
+			LOG_DBG("GPS: Ignoring (0,0) fix — GGA/RMC desync "
+				"(fix=%d sats=%d alt_mm=%d)",
+				data->info.fix_status,
+				data->info.satellites_cnt,
+				data->nav_data.altitude);
+			if (gps_current_state == GPS_STATE_ACQUIRING &&
+			    consecutive_good_fixes > 0) {
+				consecutive_good_fixes = 0;
+			}
+			k_mutex_unlock(&gps_mutex);
+			return;
+		}
+
 		current_pos.latitude_ndeg = data->nav_data.latitude;
 		current_pos.longitude_ndeg = data->nav_data.longitude;
 		current_pos.altitude_mm = data->nav_data.altitude;
