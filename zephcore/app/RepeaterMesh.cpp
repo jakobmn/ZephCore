@@ -309,6 +309,15 @@ int RepeaterMesh::handleRequest(ClientInfo* sender, uint32_t sender_timestamp, u
                 gpos.altitude_mm / 1000.0f);
         }
 
+        /* Wake GPS / extend acquire window so the next telemetry poll has
+         * a fresher fix. In repeater mode GPS is normally off between the
+         * 48h time-sync cycles — this opportunistically rearms acquire
+         * when someone actually cares about our position. No-op if GPS
+         * is disabled in prefs. */
+        if (gps_is_available() && gps_is_enabled()) {
+            gps_request_fresh_fix();
+        }
+
         return 4 + lpp.getSize();
     }
 

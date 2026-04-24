@@ -418,7 +418,7 @@ config ZEPHCORE_LORA_RX_DUTY_CYCLE
 
 config ZEPHCORE_APC
 	bool "Adaptive Power Control (APC)"
-	default n
+	default y
 	help
 	  Automatically reduce TX power when echo packets from neighbors
 	  indicate excess SNR margin. Saves battery and reduces channel
@@ -428,8 +428,8 @@ config ZEPHCORE_APC
 	  Uses rogue-filtering: clusters echo SNRs to avoid one badly
 	  placed high-SNR neighbor from over-reducing power.
 
-	  Off by default. Enable with CONFIG_ZEPHCORE_APC=y in board.conf
-	  or via EXTRA_CONF_FILE.
+	  Compiled in by default; disabled at runtime (enable per-node
+	  via CLI "set tx apc" — persisted in prefs).
 
 endmenu
 

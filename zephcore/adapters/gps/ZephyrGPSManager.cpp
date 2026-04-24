@@ -1464,7 +1464,27 @@ void gps_request_fresh_fix(void)
 		k_work_cancel_delayable(&gps_wake_work);
 		gps_start_acquiring();
 	} else if (gps_current_state == GPS_STATE_ACQUIRING) {
-		LOG_DBG("GPS: Fresh fix requested but already acquiring");
+		/* Already acquiring — reschedule the timeout so the caller's
+		 * fresh-fix request gets a full window from now. Otherwise, a
+		 * telemetry request that arrives 25s into a 30s acquire window
+		 * only has 5s left, which in marginal signal usually means the
+		 * chip goes to standby before producing a fix the requester
+		 * could use. Repeater mode uses its own 5min timeout; companion
+		 * mode pre-first-fix has no timeout (nothing to reschedule). */
+		uint32_t timeout_ms = 0;
+		if (gps_repeater_mode) {
+			timeout_ms = GPS_REPEATER_SYNC_TIMEOUT_MS;
+		} else if (first_fix_acquired) {
+			timeout_ms = gps_acquire_timeout_ms;
+		}
+		if (timeout_ms > 0) {
+			LOG_INF("GPS: Fresh fix requested, extending acquire "
+				"timeout by %u ms", timeout_ms);
+			k_work_reschedule(&gps_timeout_work, K_MSEC(timeout_ms));
+		} else {
+			LOG_DBG("GPS: Fresh fix requested, already acquiring "
+				"(no timeout active)");
+		}
 	}
 #endif
 }
