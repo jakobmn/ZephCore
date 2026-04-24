@@ -41,6 +41,11 @@ static uint8_t  font_w;
 static uint8_t  font_h;
 static bool     is_epd;       /* true for e-paper displays */
 
+/* Optional symmetric inset (pixels).  Shrinks reported width/height and
+ * offsets all draw primitives so panels with edge artefacts can hide them
+ * behind a clean background margin. */
+#define DISP_INSET ((int)CONFIG_ZEPHCORE_DISPLAY_INSET)
+
 /* Optional display backlight regulator (e.g. e-paper frontlight).
  * Boards define a "disp_pwr_enable" regulator-fixed node to gate the
  * backlight circuit.  When present, backlight follows display on/off. */
@@ -179,14 +184,19 @@ int mc_display_init(void)
 		return ret;
 	}
 
-	/* Select smallest font — scan all registered fonts and pick the one
-	 * with the smallest height for best text density.  Our custom 6x8
-	 * Latin-1 font will typically win. */
+	/* Font selection.
+	 * Default: smallest height for best text density — our custom 6x8
+	 * Latin-1 font typically wins on OLEDs.
+	 * LARGE_FONT: smallest font whose height is >= 16 — picks Zephyr's
+	 * built-in 10x16 (cfb_fonts.c) for larger e-paper panels where 6x8
+	 * is too small to read.  Falls back to smallest-overall if no tall
+	 * font is compiled in. */
+	const bool want_large = IS_ENABLED(CONFIG_ZEPHCORE_DISPLAY_LARGE_FONT);
 	int num_fonts = cfb_get_numof_fonts(disp_dev);
 
 	LOG_DBG("display: %d fonts available", num_fonts);
 
-	int best_idx = 0;
+	int best_idx = -1;
 	uint8_t best_h = 255;
 
 	for (int i = 0; i < num_fonts; i++) {
@@ -194,9 +204,30 @@ int mc_display_init(void)
 
 		cfb_get_font_size(disp_dev, i, &fw, &fh);
 		LOG_DBG("  font[%d]: %ux%u", i, fw, fh);
-		if (fh < best_h) {
-			best_h = fh;
-			best_idx = i;
+		if (want_large) {
+			if (fh >= 16 && fh < best_h) {
+				best_h = fh;
+				best_idx = i;
+			}
+		} else {
+			if (fh < best_h) {
+				best_h = fh;
+				best_idx = i;
+			}
+		}
+	}
+	if (best_idx < 0) {
+		/* No font satisfied the LARGE_FONT threshold — fall back to
+		 * the smallest so we still render something. */
+		best_idx = 0;
+		for (int i = 0; i < num_fonts; i++) {
+			uint8_t fw = 0, fh = 0;
+
+			cfb_get_font_size(disp_dev, i, &fw, &fh);
+			if (fh < best_h) {
+				best_h = fh;
+				best_idx = i;
+			}
 		}
 	}
 
@@ -235,12 +266,16 @@ int mc_display_init(void)
 
 uint16_t mc_display_width(void)
 {
-	return disp_width;
+	int w = (int)disp_width - 2 * DISP_INSET;
+
+	return (w > 0) ? (uint16_t)w : 0;
 }
 
 uint16_t mc_display_height(void)
 {
-	return disp_height;
+	int h = (int)disp_height - 2 * DISP_INSET;
+
+	return (h > 0) ? (uint16_t)h : 0;
 }
 
 uint8_t mc_display_font_width(void)
@@ -314,7 +349,7 @@ void mc_display_text(int x, int y, const char *text, bool invert)
 		cfb_framebuffer_invert(disp_dev);
 	}
 
-	cfb_print(disp_dev, text, x, y);
+	cfb_print(disp_dev, text, x + DISP_INSET, y + DISP_INSET);
 
 	if (invert) {
 		cfb_framebuffer_invert(disp_dev);
@@ -328,9 +363,11 @@ void mc_display_fill_rect(int x, int y, int w, int h)
 	}
 
 	/* CFB doesn't have a native fill_rect, so we draw line by line */
-	for (int row = y; row < y + h && row < disp_height; row++) {
-		struct cfb_position start = { .x = x, .y = row };
-		struct cfb_position end = { .x = x + w - 1, .y = row };
+	const int row_clamp = (int)disp_height - DISP_INSET;
+
+	for (int row = y + DISP_INSET; row < y + h + DISP_INSET && row < row_clamp; row++) {
+		struct cfb_position start = { .x = x + DISP_INSET, .y = row };
+		struct cfb_position end = { .x = x + w - 1 + DISP_INSET, .y = row };
 		cfb_draw_line(disp_dev, &start, &end);
 	}
 }
@@ -341,8 +378,8 @@ void mc_display_hline(int x, int y, int w)
 		return;
 	}
 
-	struct cfb_position start = { .x = x, .y = y };
-	struct cfb_position end = { .x = x + w - 1, .y = y };
+	struct cfb_position start = { .x = x + DISP_INSET, .y = y + DISP_INSET };
+	struct cfb_position end = { .x = x + w - 1 + DISP_INSET, .y = y + DISP_INSET };
 	cfb_draw_line(disp_dev, &start, &end);
 }
 
@@ -364,8 +401,8 @@ void mc_display_xbm(int x, int y, const uint8_t *data, int w, int h)
 
 			if (data[byte_idx] & (1 << bit_idx)) {
 				struct cfb_position pos = {
-					.x = (int16_t)(x + col),
-					.y = (int16_t)(y + row)
+					.x = (int16_t)(x + col + DISP_INSET),
+					.y = (int16_t)(y + row + DISP_INSET)
 				};
 				cfb_draw_point(disp_dev, &pos);
 			}

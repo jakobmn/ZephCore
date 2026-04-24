@@ -25,6 +25,7 @@ Other benefits:
 | **RAK3401 1W** | SX1262 + SKY66122 (30 dBm) | GPS (u-blox MAX-7Q, optional), I2C sensors |
 | **RAK WisMesh Tag** | SX1262 | GPS (AT6558R), accelerometer, RGB LEDs, buzzer |
 | **ThinkNode M1** | SX1262 | GPS, e-paper display (SSD1681), QSPI flash, buzzer, RGB LEDs |
+| **LilyGo T-Echo** | SX1262 (TCXO 1.8V) | GPS (L76K), 1.54" e-paper (SSD1681), BME280, QSPI flash, touch-button backlight |
 | **Ikoka Nano 30dBm** | SX1262 (E22-900M30S, 30dBm PA) | RGB LEDs |
 
 ### ESP32

@@ -353,12 +353,12 @@ static void action_page_enter(void)
 		break;
 
 	case UI_PAGE_OFFGRID: {
-		/* Double-press confirmation (500ms window) */
+		/* Double-press confirmation (CONFIRM_WINDOW_MS window) */
 		struct ui_state *st_og = get_state();
 		uint32_t now_og = k_uptime_get_32();
 
 		if (st_og->offgrid_confirm_time != 0 &&
-		    (now_og - st_og->offgrid_confirm_time) <= 500) {
+		    (now_og - st_og->offgrid_confirm_time) <= CONFIG_ZEPHCORE_UI_CONFIRM_WINDOW_MS) {
 			/* Confirmed — toggle offgrid mode */
 			bool new_state = !st_og->offgrid_enabled;
 			st_og->offgrid_enabled = new_state;
@@ -374,12 +374,12 @@ static void action_page_enter(void)
 	}
 
 	case UI_PAGE_DFU: {
-		/* Double-press confirmation (500ms window) */
+		/* Double-press confirmation (CONFIRM_WINDOW_MS window) */
 		struct ui_state *st_dfu = get_state();
 		uint32_t now_dfu = k_uptime_get_32();
 
 		if (st_dfu->dfu_confirm_time != 0 &&
-		    (now_dfu - st_dfu->dfu_confirm_time) <= 500) {
+		    (now_dfu - st_dfu->dfu_confirm_time) <= CONFIG_ZEPHCORE_UI_CONFIRM_WINDOW_MS) {
 			/* Confirmed — reboot into BLE DFU */
 			action_enter_dfu();
 		} else {
@@ -391,12 +391,12 @@ static void action_page_enter(void)
 	}
 
 	case UI_PAGE_SHUTDOWN: {
-		/* Double-press confirmation (500ms window) */
+		/* Double-press confirmation (CONFIRM_WINDOW_MS window) */
 		struct ui_state *st = get_state();
 		uint32_t now = k_uptime_get_32();
 
 		if (st->shutdown_confirm_time != 0 &&
-		    (now - st->shutdown_confirm_time) <= 500) {
+		    (now - st->shutdown_confirm_time) <= CONFIG_ZEPHCORE_UI_CONFIRM_WINDOW_MS) {
 			/* Confirmed — shut down */
 			action_deep_sleep();
 		} else {

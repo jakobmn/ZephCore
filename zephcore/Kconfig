@@ -541,6 +541,44 @@ config ZEPHCORE_UI_DISPLAY_AUTO_OFF_MS
 	  Time in milliseconds before the display turns off
 	  after the last user interaction. Set to 0 to disable.
 
+config ZEPHCORE_UI_CONFIRM_WINDOW_MS
+	int "Double-press confirmation window (ms)"
+	default 500
+	depends on ZEPHCORE_UI_DISPLAY
+	help
+	  Maximum time between the two KEY_ENTER presses that confirm
+	  destructive actions (shutdown, DFU, offgrid toggle).  The default
+	  500 ms suits boards where ENTER is a direct short tap.  Boards
+	  with only one button that emit ENTER via a zephyr,input-longpress
+	  filter (T-Echo, RAK4631 Pocket) need a longer window — two
+	  1 s holds plus the release gap do not fit in 500 ms.  Set to
+	  3000 on such boards.
+
+config ZEPHCORE_DISPLAY_INSET
+	int "Display inset margin (pixels)"
+	default 0
+	depends on ZEPHCORE_UI_DISPLAY
+	help
+	  Shrink the usable drawing area by this many pixels on each side.
+	  mc_display_width/height() report the reduced size and all draw
+	  primitives are offset by this amount.  Useful on panels (e.g.
+	  LilyGo T-Echo SSD1681) where the outermost rows/columns show
+	  hardware artefacts — a small inset hides them behind a clean
+	  background margin.  Set to 0 on boards without edge artefacts.
+
+config ZEPHCORE_DISPLAY_LARGE_FONT
+	bool "Use a larger built-in CFB font"
+	default n
+	depends on ZEPHCORE_UI_DISPLAY && CHARACTER_FRAMEBUFFER_USE_DEFAULT_FONTS
+	help
+	  Select the smallest Zephyr built-in CFB font whose height is
+	  >= 16 pixels (typically the 10x16 font).  Intended for larger
+	  e-paper panels (T-Echo, ThinkNode M1) where the default 6x8
+	  glyph is too small to read comfortably.  The ui_pages.c layout
+	  auto-centers its content rows using the active font height, so
+	  no per-page changes are needed.  Requires Zephyr's default CFB
+	  fonts to be compiled in (CONFIG_CHARACTER_FRAMEBUFFER_USE_DEFAULT_FONTS).
+
 config ZEPHCORE_EASTER_EGG_DOOM
 	bool "Enable Doom raycaster easter egg"
 	default n
